@@ -29,6 +29,7 @@ from rich.table import Table
 
 from .agent import build_deep_agent
 from .config import HTTPServerSpec, ServerSpec, StdioServerSpec
+from .orchestrator import DynamicOrchestrator
 
 load_dotenv()
 
@@ -278,5 +279,105 @@ def run(
             )
             if raw:
                 console.print(result)
+
+    asyncio.run(_chat())
+
+
+@app.command(name="run-dynamic")
+def run_dynamic(
+    model_id: Annotated[
+        str,
+        typer.Option(..., help="REQUIRED model provider id (e.g., 'openai:gpt-4')."),
+    ],
+    smithery_key: Annotated[
+        str,
+        typer.Option(
+            ...,
+            "--smithery-key",
+            envvar="SMITHERY_API_KEY",
+            help="Smithery API key for dynamic tool discovery.",
+        ),
+    ],
+    http: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--http",
+            help=(
+                'Block string: "name=... url=... [transport=http|streamable-http|sse] '
+                '[header.X=Y] [auth=...]". Repeatable. Optional - tools discovered dynamically.'
+            ),
+        ),
+    ] = None,
+    instructions: Annotated[
+        str,
+        typer.Option("--instructions", help="Optional system prompt override."),
+    ] = "",
+) -> None:
+    """Start an interactive agent with DYNAMIC tool discovery via Smithery registry.
+
+    This command enables automatic MCP server discovery. When the agent needs a tool
+    that isn't available, it will:
+    1. Detect the missing capability
+    2. Search the Smithery registry
+    3. Add the server dynamically
+    4. Retry the task with the new tool
+
+    Example:
+        deepmcpagent run-dynamic \\
+          --model-id "openai:gpt-4" \\
+          --smithery-key "sk_..." \\
+          --http name=math url=http://localhost:8000/mcp
+
+    Then ask: "Search GitHub for MCP servers"
+    → Agent will auto-discover and add the GitHub MCP server!
+    """
+    # Parse initial servers (optional)
+    servers = _merge_servers([], http or [])
+
+    async def _chat() -> None:
+        # Create dynamic orchestrator
+        orchestrator = DynamicOrchestrator(
+            model=model_id,
+            initial_servers=servers,
+            smithery_key=smithery_key,
+            instructions=instructions or None,
+        )
+
+        console.print("[bold cyan]DynamicOrchestrator is ready![/bold cyan]")
+        console.print("[dim]Dynamic tool discovery enabled via Smithery registry.[/dim]")
+        console.print("[dim]Type 'exit' to quit.[/dim]\n")
+
+        while True:
+            try:
+                user = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\nExiting.")
+                break
+
+            if user.lower() in {"exit", "quit"}:
+                break
+
+            if not user:
+                continue
+
+            try:
+                # Use orchestrator's chat method
+                response = await orchestrator.chat(user)
+
+                # Display response
+                console.print(
+                    Panel(response or "(no content)", title="Agent Response", style="bold green")
+                )
+
+                # Show active servers count
+                num_servers = len(orchestrator.servers)
+                console.print(
+                    f"[dim]Active servers: {num_servers} | "
+                    f"Servers: {list(orchestrator.servers.keys())}[/dim]\n"
+                )
+
+            except Exception as exc:
+                console.print(f"[red]Error:[/red] {exc}\n")
+                continue
 
     asyncio.run(_chat())
