@@ -1,58 +1,43 @@
 """
-CLI for deepmcpagent: list tools and run an interactive agent session.
+OneShotMCP CLI: One prompt. Zero setup. Infinite MCP tools.
 
-Notes:
-    - The CLI path uses provider id strings for models (e.g., "openai:gpt-4.1"),
-      which `init_chat_model` handles. In code, you can pass a model instance.
-    - Model is REQUIRED (no fallback).
-    - Usage for repeated server specs:
-        --stdio "name=echo command=python args='-m mypkg.server --port 3333' env.API_KEY=xyz keep_alive=false"
-        --stdio "name=tool2 command=/usr/local/bin/tool2"
-        --http  "name=remote url=http://127.0.0.1:8000/mcp transport=http"
+The CLI automatically discovers and configures MCP servers on-demand using
+the Smithery registry. Model configuration is via environment variable.
 
-      (Repeat --stdio/--http for multiple servers.)
+Environment Variables:
+    ONESHOT_MODEL: Model to use (default: "openai:gpt-4.1-nano")
+    SMITHERY_API_KEY: Required - API key for Smithery registry
+    TAVILY_API_KEY: Optional - Auto-configures Tavily web search if set
+
+Usage:
+    oneshot  # Start interactive agent with dynamic discovery
+    oneshot --http "name=math url=http://localhost:8000/mcp"  # Add custom server
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
+import os
 import shlex
 from importlib.metadata import version as get_version
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Literal, cast
 
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 
 # Suppress known third-party deprecation warnings BEFORE importing agent modules
 from ._warnings import suppress_known_warnings
 
 suppress_known_warnings()
 
-from .agent import build_deep_agent
 from .config import HTTPServerSpec, ServerSpec, StdioServerSpec
 from .orchestrator import DynamicOrchestrator
 
 load_dotenv()
 
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(add_completion=False)
 console = Console()
-
-
-@app.callback(invoke_without_command=True)
-def _version_callback(
-    version: Annotated[
-        bool | None,
-        typer.Option("--version", help="Show version and exit", is_eager=True),
-    ] = None,
-) -> None:
-    """Global callback to support --version printing."""
-    if version:
-        console.print(get_version("deepmcpagent"))
-        raise typer.Exit()
 
 
 def _parse_kv(opts: list[str]) -> dict[str, str]:
@@ -85,8 +70,6 @@ def _get_default_servers() -> dict[str, ServerSpec]:
         >>> "tavily" in servers
         True
     """
-    import os
-
     servers: dict[str, ServerSpec] = {}
 
     # Tavily web search (if API key is available)
@@ -172,210 +155,86 @@ def _merge_servers(stdios: list[str], https: list[str]) -> dict[str, ServerSpec]
     return servers
 
 
-def _extract_final_answer(result: Any) -> str:
-    """Best-effort extraction of the final text from various executors."""
-    try:
-        # LangGraph prebuilt returns {"messages": [ ... ]}
-        if isinstance(result, dict) and "messages" in result and result["messages"]:
-            last = result["messages"][-1]
-            content = getattr(last, "content", None)
-            if isinstance(content, str) and content:
-                return content
-            if isinstance(content, list) and content and isinstance(content[0], dict):
-                return content[0].get("text") or str(content)
-            return str(last)
-        return str(result)
-    except Exception:
-        return str(result)
-
-
-@app.command(name="list-tools")
-def list_tools(
-    model_id: Annotated[
-        str,
-        typer.Option("--model-id", help="REQUIRED model provider id (e.g., 'openai:gpt-4.1')."),
-    ],
-    stdio: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--stdio",
-            help=(
-                "Block string: \"name=... command=... args='...' "
-                '[env.X=Y] [cwd=...] [keep_alive=true|false]". Repeatable.'
-            ),
-        ),
-    ] = None,
-    http: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--http",
-            help=(
-                'Block string: "name=... url=... [transport=http|streamable-http|sse] '
-                '[header.X=Y] [auth=...]". Repeatable.'
-            ),
-        ),
-    ] = None,
-    instructions: Annotated[
-        str,
-        typer.Option("--instructions", help="Optional system prompt override."),
-    ] = "",
-) -> None:
-    """List all MCP tools discovered using the provided server specs."""
-    servers = _merge_servers(stdio or [], http or [])
-
-    async def _run() -> None:
-        _, loader = await build_deep_agent(
-            servers=servers,
-            model=model_id,
-            instructions=instructions or None,
-        )
-        infos = await loader.list_tool_info()
-        infos = list(infos or [])
-
-        table = Table(title="MCP Tools", show_lines=True)
-        table.add_column("Tool", style="cyan", no_wrap=True)
-        table.add_column("Description", style="green")
-        table.add_column("Input Schema", style="white")
-        for i in infos:
-            schema_str = json.dumps(i.input_schema, ensure_ascii=False)
-            if len(schema_str) > 120:
-                schema_str = schema_str[:117] + "..."
-            table.add_row(i.name, i.description or "-", schema_str)
-        console.print(table)
-
-    asyncio.run(_run())
-
-
 @app.command()
-def run(
-    model_id: Annotated[
-        str,
-        typer.Option(..., help="REQUIRED model provider id (e.g., 'openai:gpt-4.1')."),
-    ],
-    stdio: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--stdio",
-            help=(
-                "Block string: \"name=... command=... args='...' "
-                '[env.X=Y] [cwd=...] [keep_alive=true|false]". Repeatable.'
-            ),
-        ),
-    ] = None,
-    http: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--http",
-            help=(
-                'Block string: "name=... url=... [transport=http|streamable-http|sse] '
-                '[header.X=Y] [auth=...]". Repeatable.'
-            ),
-        ),
-    ] = None,
-    instructions: Annotated[
-        str,
-        typer.Option("--instructions", help="Optional system prompt override."),
-    ] = "",
-    # IMPORTANT: don't duplicate defaults in Option() and the parameter!
-    trace: Annotated[
+def main(
+    version: Annotated[
         bool,
-        typer.Option("--trace/--no-trace", help="Print tool invocations & results."),
-    ] = True,
-    raw: Annotated[
-        bool,
-        typer.Option("--raw/--no-raw", help="Also print raw result object."),
+        typer.Option("--version", help="Show version and exit"),
     ] = False,
-) -> None:
-    """Start an interactive agent that uses only MCP tools."""
-    servers = _merge_servers(stdio or [], http or [])
-
-    async def _chat() -> None:
-        graph, _ = await build_deep_agent(
-            servers=servers,
-            model=model_id,
-            instructions=instructions or None,
-            trace_tools=trace,  # <- enable deepmcpagent tool tracing
-        )
-        console.print("[bold]DeepMCPAgent is ready. Type 'exit' to quit.[/bold]")
-        while True:
-            try:
-                user = input("> ").strip()
-            except (EOFError, KeyboardInterrupt):
-                console.print("\nExiting.")
-                break
-            if user.lower() in {"exit", "quit"}:
-                break
-            if not user:
-                continue
-            try:
-                result = await graph.ainvoke({"messages": [{"role": "user", "content": user}]})
-            except Exception as exc:
-                console.print(f"[red]Error during run:[/red] {exc}")
-                continue
-
-            final_text = _extract_final_answer(result)
-            console.print(
-                Panel(final_text or "(no content)", title="Final LLM Answer", style="bold green")
-            )
-            if raw:
-                console.print(result)
-
-    asyncio.run(_chat())
-
-
-@app.command(name="run-dynamic")
-def run_dynamic(
-    model_id: Annotated[
-        str,
-        typer.Option(..., help="REQUIRED model provider id (e.g., 'openai:gpt-4')."),
-    ],
     smithery_key: Annotated[
-        str,
+        str | None,
         typer.Option(
-            ...,
             "--smithery-key",
             envvar="SMITHERY_API_KEY",
-            help="Smithery API key for dynamic tool discovery.",
+            help="Smithery API key for dynamic tool discovery (or set SMITHERY_API_KEY env var)",
         ),
-    ],
+    ] = None,
     http: Annotated[
         list[str] | None,
         typer.Option(
             "--http",
             help=(
-                'Block string: "name=... url=... [transport=http|streamable-http|sse] '
-                '[header.X=Y] [auth=...]". Repeatable. Optional - tools discovered dynamically.'
+                'Add custom server: "name=... url=... [transport=http|streamable-http|sse] '
+                '[header.X=Y] [auth=...]". Repeatable.'
+            ),
+        ),
+    ] = None,
+    stdio: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--stdio",
+            help=(
+                "Add stdio server: \"name=... command=... args='...' "
+                '[env.X=Y] [cwd=...] [keep_alive=true|false]". Repeatable.'
             ),
         ),
     ] = None,
     instructions: Annotated[
         str,
-        typer.Option("--instructions", help="Optional system prompt override."),
+        typer.Option("--instructions", help="Custom system prompt"),
     ] = "",
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Show LLM reasoning and tool calls"),
+    ] = True,
 ) -> None:
-    """Start an interactive agent with DYNAMIC tool discovery via Smithery registry.
+    """OneShotMCP: Dynamic MCP agent with automatic tool discovery.
 
-    This command enables automatic MCP server discovery. When the agent needs a tool
-    that isn't available, it will:
-    1. Detect the missing capability
-    2. Search the Smithery registry
-    3. Add the server dynamically
-    4. Retry the task with the new tool
+    Automatically discovers and configures MCP servers on-demand using the
+    Smithery registry. When the agent needs a capability, it:
+
+    1. Detects the missing tool
+    2. Searches Smithery for matching servers
+    3. Adds the server dynamically
+    4. Retries with the new capability
 
     Example:
-        deepmcpagent run-dynamic \\
-          --model-id "openai:gpt-4" \\
-          --smithery-key "sk_..." \\
-          --http name=math url=http://localhost:8000/mcp
+        $ export SMITHERY_API_KEY="sk_..."
+        $ export TAVILY_API_KEY="tvly_..."
+        $ oneshot
 
-    Then ask: "Search GitHub for MCP servers"
-    → Agent will auto-discover and add the GitHub MCP server!
+        > Search GitHub for MCP servers
+        → Auto-discovers GitHub server and searches!
     """
+    if version:
+        console.print(get_version("oneshotmcp"))
+        raise typer.Exit()
+
+    if not smithery_key:
+        console.print("[red]Error:[/red] SMITHERY_API_KEY is required")
+        console.print("\nSet it via:")
+        console.print("  export SMITHERY_API_KEY='your_key_here'")
+        console.print("  or use --smithery-key flag")
+        raise typer.Exit(code=1)
+
+    # Get model from env var
+    model = os.getenv("ONESHOT_MODEL", "openai:gpt-4.1-nano")
+
     # Get default pre-configured servers (e.g., Tavily from env)
     default_servers = _get_default_servers()
 
     # Parse user-provided servers (optional)
-    user_servers = _merge_servers([], http or [])
+    user_servers = _merge_servers(stdio or [], http or [])
 
     # Merge: user servers override defaults
     servers = {**default_servers, **user_servers}
@@ -383,13 +242,13 @@ def run_dynamic(
     async def _chat() -> None:
         # Create dynamic orchestrator
         orchestrator = DynamicOrchestrator(
-            model=model_id,
+            model=model,
             initial_servers=servers,
             smithery_key=smithery_key,
             instructions=instructions or None,
         )
 
-        console.print("[bold cyan]DynamicOrchestrator is ready![/bold cyan]")
+        console.print(f"[bold cyan]OneShotMCP ready![/bold cyan] (model: {model})")
         console.print("[dim]Dynamic tool discovery enabled via Smithery registry.[/dim]")
         console.print("[dim]Type 'exit' to quit.[/dim]\n")
 
@@ -407,23 +266,32 @@ def run_dynamic(
                 continue
 
             try:
+                if verbose:
+                    console.print(f"[dim]→ Thinking...[/dim]")
+
                 # Use orchestrator's chat method
                 response = await orchestrator.chat(user)
 
                 # Display response
-                console.print(
-                    Panel(response or "(no content)", title="Agent Response", style="bold green")
-                )
+                console.print(f"\n[bold green]Assistant:[/bold green] {response}\n")
 
-                # Show active servers count
-                num_servers = len(orchestrator.servers)
-                console.print(
-                    f"[dim]Active servers: {num_servers} | "
-                    f"Servers: {list(orchestrator.servers.keys())}[/dim]\n"
-                )
+                if verbose:
+                    # Show active servers
+                    num_servers = len(orchestrator.servers)
+                    server_names = list(orchestrator.servers.keys())
+                    console.print(
+                        f"[dim]📊 Active servers: {num_servers} {server_names}[/dim]\n"
+                    )
 
             except Exception as exc:
                 console.print(f"[red]Error:[/red] {exc}\n")
+                if verbose:
+                    import traceback
+                    console.print(f"[dim]{traceback.format_exc()}[/dim]")
                 continue
 
     asyncio.run(_chat())
+
+
+if __name__ == "__main__":
+    app()
