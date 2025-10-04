@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from deepmcpagent.config import HTTPServerSpec
+from oneshotmcp.config import HTTPServerSpec
 
 # Mock HTTP responses
 MOCK_SEARCH_RESPONSE = {
@@ -40,7 +40,7 @@ MOCK_SERVER_METADATA = {
 @pytest.mark.asyncio
 async def test_search_returns_server_list() -> None:
     """Test that search returns a list of servers from Smithery."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -75,7 +75,7 @@ async def test_search_returns_server_list() -> None:
 @pytest.mark.asyncio
 async def test_get_server_returns_http_spec() -> None:
     """Test that get_server returns a valid HTTPServerSpec."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -104,7 +104,7 @@ async def test_get_server_returns_http_spec() -> None:
 @pytest.mark.asyncio
 async def test_search_caches_results() -> None:
     """Test that repeated searches use cache and don't make redundant API calls."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -138,7 +138,7 @@ async def test_search_caches_results() -> None:
 @pytest.mark.asyncio
 async def test_get_server_caches_results() -> None:
     """Test that get_server caches HTTPServerSpec objects."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -171,7 +171,7 @@ async def test_search_handles_404() -> None:
     """Test graceful handling of not found responses."""
     from httpx import HTTPStatusError, Request, Response
 
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -203,7 +203,7 @@ async def test_get_server_handles_404() -> None:
     """Test graceful handling of not found server."""
     from httpx import HTTPStatusError, Request, Response
 
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -235,7 +235,7 @@ async def test_search_handles_timeout() -> None:
     """Test timeout handling with appropriate error message."""
     from httpx import TimeoutException
 
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -256,7 +256,7 @@ async def test_search_handles_500_error() -> None:
     """Test handling of server errors."""
     from httpx import HTTPStatusError, Request, Response
 
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -286,7 +286,7 @@ async def test_search_handles_500_error() -> None:
 @pytest.mark.asyncio
 async def test_search_with_limit() -> None:
     """Test that search respects limit parameter."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -316,7 +316,7 @@ async def test_search_with_limit() -> None:
 @pytest.mark.asyncio
 async def test_empty_search_results() -> None:
     """Test handling of empty search results."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -342,7 +342,7 @@ async def test_empty_search_results() -> None:
 @pytest.mark.asyncio
 async def test_get_server_with_sse_transport() -> None:
     """Test that get_server correctly handles different transport types."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
@@ -382,7 +382,7 @@ async def test_get_server_with_sse_transport() -> None:
 @pytest.mark.asyncio
 async def test_client_uses_api_key() -> None:
     """Test that API key is included in requests."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="secret_key_123")
 
