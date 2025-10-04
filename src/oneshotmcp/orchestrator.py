@@ -44,11 +44,13 @@ class DynamicOrchestrator:
         initial_servers: dict[str, ServerSpec],
         smithery_key: str,
         instructions: str | None = None,
+        verbose: bool = False,
     ) -> None:
         self.model = model
         self.servers: dict[str, ServerSpec] = dict(initial_servers)
         self.smithery = SmitheryAPIClient(api_key=smithery_key)
         self.instructions = instructions
+        self.verbose = verbose
 
         # External message storage (persists across rebuilds)
         self.messages: list[dict[str, Any]] = []
@@ -67,11 +69,19 @@ class DynamicOrchestrator:
         Raises:
             Exception: If agent building fails.
         """
+        if self.verbose:
+            print(f"[BUILD] Rebuilding agent with {len(self.servers)} server(s)...")
+
         self.graph, self.loader = await build_deep_agent(
             servers=self.servers,
             model=self.model,
             instructions=self.instructions,
+            trace_tools=self.verbose,  # Enable tool tracing in verbose mode
         )
+
+        if self.verbose:
+            tool_count = len(await self.loader.get_all_tools()) if self.loader else 0
+            print(f"[BUILD] Agent ready with {tool_count} tool(s)")
 
     def _needs_tools(self, response: str) -> bool:
         """Detect if the agent response indicates missing tools.
@@ -161,10 +171,15 @@ class DynamicOrchestrator:
             ...     print("GitHub server added!")
         """
         try:
+            if self.verbose:
+                print(f"[DISCOVERY] Searching Smithery for '{capability}' servers...")
+
             # Search Smithery for matching servers
             results = await self.smithery.search(query=capability, limit=1)
 
             if not results:
+                if self.verbose:
+                    print(f"[DISCOVERY] No servers found for '{capability}'")
                 return False
 
             # Get the first result
@@ -175,11 +190,18 @@ class DynamicOrchestrator:
             if not qualified_name:
                 return False
 
+            if self.verbose:
+                print(f"[DISCOVERY] Found server: {qualified_name}")
+                print(f"[DISCOVERY] Fetching server specification...")
+
             # Get full server spec
             spec = await self.smithery.get_server(qualified_name)
 
             # Add to active servers (use capability as name)
             self.servers[capability] = spec
+
+            if self.verbose:
+                print(f"[DISCOVERY] ✓ Added '{qualified_name}' as '{capability}' server")
 
             return True
 
@@ -195,6 +217,9 @@ class DynamicOrchestrator:
                     f"💡 Tip: You can manually configure this server if you have credentials,"
                 )
                 print(f"   or try a different query to find alternative servers.")
+            else:
+                if self.verbose:
+                    print(f"[DISCOVERY] Error during discovery: {exc}")
             # Otherwise silently fail for other discovery errors
             return False
 

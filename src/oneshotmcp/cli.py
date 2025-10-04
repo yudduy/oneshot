@@ -246,6 +246,7 @@ def main(
             initial_servers=servers,
             smithery_key=smithery_key,
             instructions=instructions or None,
+            verbose=verbose,
         )
 
         console.print(f"[bold cyan]OneShotMCP ready![/bold cyan] (model: {model})")
