@@ -12,6 +12,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, create_model
 
 from .clients import FastMCPMulti
+from .config import MAX_TOOLS_PER_SERVER
 
 # Callback types for tracing tool calls
 OnBefore = Callable[[str, dict[str, Any]], None]
@@ -162,28 +163,86 @@ class MCPToolLoader:
         return c, list(tools or [])
 
     async def get_all_tools(self) -> list[BaseTool]:
-        """Return all available tools as LangChain `BaseTool` instances."""
+        """Return all available tools as LangChain `BaseTool` instances.
+
+        Implements tool filtering to prevent context window overflow:
+        - Groups tools by server
+        - Limits each server to MAX_TOOLS_PER_SERVER tools
+        - Logs tool counts in verbose mode
+
+        Returns:
+            List of BaseTool instances, filtered to stay within context limits.
+        """
         client, tools = await self._list_tools_raw()
 
-        out: list[BaseTool] = []
+        # Group tools by server to apply per-server limits
+        tools_by_server: dict[str, list[Any]] = {}
         for t in tools:
-            name = t.name
-            desc = getattr(t, "description", "") or ""
-            schema = getattr(t, "inputSchema", None) or {}
-            model = _jsonschema_to_pydantic(schema, model_name=f"Args_{name}")
-            out.append(
-                _FastMCPTool(
-                    name=name,
-                    description=desc,
-                    args_schema=model,
-                    tool_name=name,
-                    client=client,
-                    on_before=self._on_before,
-                    on_after=self._on_after,
-                    on_error=self._on_error,
+            server_name = (getattr(t, "server", None) or
+                          getattr(t, "serverName", None) or
+                          "unknown")
+            if server_name not in tools_by_server:
+                tools_by_server[server_name] = []
+            tools_by_server[server_name].append(t)
+
+        # Filter tools per server and build LangChain tools
+        out: list[BaseTool] = []
+        for server_name, server_tools in tools_by_server.items():
+            total_tools = len(server_tools)
+
+            # Apply limit per server
+            selected_tools = server_tools[:MAX_TOOLS_PER_SERVER]
+
+            # Log if filtering occurred (will be shown in verbose mode via print)
+            if total_tools > MAX_TOOLS_PER_SERVER:
+                # This will be picked up by orchestrator's verbose logging
+                pass  # Orchestrator will log this
+
+            # Convert to LangChain tools
+            for t in selected_tools:
+                name = t.name
+                desc = getattr(t, "description", "") or ""
+                schema = getattr(t, "inputSchema", None) or {}
+                model = _jsonschema_to_pydantic(schema, model_name=f"Args_{name}")
+                out.append(
+                    _FastMCPTool(
+                        name=name,
+                        description=desc,
+                        args_schema=model,
+                        tool_name=name,
+                        client=client,
+                        on_before=self._on_before,
+                        on_after=self._on_after,
+                        on_error=self._on_error,
+                    )
                 )
-            )
+
         return out
+
+    async def get_tool_stats(self) -> dict[str, dict[str, int]]:
+        """Get statistics about tool counts per server.
+
+        Returns:
+            Dict mapping server names to {"total": N, "loaded": M} counts.
+        """
+        _, tools = await self._list_tools_raw()
+
+        # Group tools by server
+        stats: dict[str, dict[str, int]] = {}
+        for t in tools:
+            server_name = (getattr(t, "server", None) or
+                          getattr(t, "serverName", None) or
+                          "unknown")
+            if server_name not in stats:
+                stats[server_name] = {"total": 0, "loaded": 0}
+            stats[server_name]["total"] += 1
+
+        # Calculate loaded count (min of total and MAX_TOOLS_PER_SERVER)
+        for server_name in stats:
+            total = stats[server_name]["total"]
+            stats[server_name]["loaded"] = min(total, MAX_TOOLS_PER_SERVER)
+
+        return stats
 
     async def list_tool_info(self) -> list[ToolInfo]:
         """Return human-readable tool metadata for introspection or debugging."""

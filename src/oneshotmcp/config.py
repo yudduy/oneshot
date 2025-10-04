@@ -7,6 +7,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Context length management: limit tools loaded per server
+# This prevents context window overflow with models like gpt-4.1-nano (8K tokens)
+# Adjust based on your model's context window:
+# - Small models (gpt-4.1-nano, 8K): 20-30 tools
+# - Medium models (gpt-4-turbo, 128K): 50-100 tools
+# - Large models (claude-sonnet-3.5-v2, 200K): 100+ tools
+MAX_TOOLS_PER_SERVER = 30
+
 
 class _BaseServer(BaseModel):
     """Base model for server specs."""

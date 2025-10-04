@@ -79,9 +79,30 @@ class DynamicOrchestrator:
             trace_tools=self.verbose,  # Enable tool tracing in verbose mode
         )
 
-        if self.verbose:
-            tool_count = len(await self.loader.get_all_tools()) if self.loader else 0
-            print(f"[BUILD] Agent ready with {tool_count} tool(s)")
+        if self.verbose and self.loader:
+            # Get detailed tool statistics
+            stats = await self.loader.get_tool_stats()
+            total_loaded = sum(s["loaded"] for s in stats.values())
+            total_available = sum(s["total"] for s in stats.values())
+
+            # Show per-server breakdown
+            for server_name, counts in stats.items():
+                if counts["total"] > counts["loaded"]:
+                    print(
+                        f"[BUILD] {server_name}: loaded {counts['loaded']}/{counts['total']} tools (filtered)"
+                    )
+                else:
+                    print(
+                        f"[BUILD] {server_name}: loaded {counts['loaded']} tools"
+                    )
+
+            print(f"[BUILD] Agent ready with {total_loaded} tool(s) total")
+            if total_available > total_loaded:
+                from .config import MAX_TOOLS_PER_SERVER
+                print(
+                    f"[BUILD] ℹ️  Filtered {total_available - total_loaded} tools to prevent context overflow "
+                    f"(MAX_TOOLS_PER_SERVER={MAX_TOOLS_PER_SERVER})"
+                )
 
     def _needs_tools(self, response: str) -> bool:
         """Detect if the agent response indicates missing tools.
