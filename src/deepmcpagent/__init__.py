@@ -8,6 +8,7 @@ from .config import (
     StdioServerSpec,
     servers_to_mcp_config,
 )
+from .registry import RegistryError, SmitheryAPIClient
 from .tools import MCPToolLoader, ToolInfo
 
 __all__ = [
@@ -19,4 +20,6 @@ __all__ = [
     "MCPToolLoader",
     "ToolInfo",
     "build_deep_agent",
+    "SmitheryAPIClient",
+    "RegistryError",
 ]
