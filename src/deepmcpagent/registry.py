@@ -34,7 +34,7 @@ class SmitheryAPIClient:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.smithery.ai/v1",
+        base_url: str = "https://registry.smithery.ai",
         timeout: float = 30.0,
         max_retries: int = 3,
     ) -> None:
@@ -120,15 +120,18 @@ class SmitheryAPIClient:
         if cache_key in self._search_cache:
             return self._search_cache[cache_key]
 
-        url = f"{self._base_url}/search"
+        url = f"{self._base_url}/servers"
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        payload = {"query": query, "limit": limit}
+        params = {"q": query, "pageSize": limit}
 
         async def _do_search() -> list[dict[str, Any]]:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(url, json=payload, headers=headers)
+                response = await client.get(url, params=params, headers=headers)
                 response.raise_for_status()
                 data = response.json()
+                # API returns either a list directly or a dict with "servers" key
+                if isinstance(data, list):
+                    return data
                 servers: list[dict[str, Any]] = data.get("servers", [])
                 return servers
 
@@ -189,13 +192,21 @@ class SmitheryAPIClient:
                 func=_do_get_server,
             )
 
-            # Extract server metadata
-            server_url = data.get("url")
-            transport = data.get("transport", "http")
+            # Extract connection information from the connections array
+            connections = data.get("connections", [])
+            if not connections:
+                raise RegistryError(
+                    f"Server '{qualified_name}' has no connections defined"
+                )
+
+            # Use the first connection (typically the primary one)
+            connection = connections[0]
+            server_url = connection.get("deploymentUrl")
+            transport = connection.get("type", "http")
 
             if not server_url:
                 raise RegistryError(
-                    f"Server '{qualified_name}' metadata missing 'url' field"
+                    f"Server '{qualified_name}' connection missing 'deploymentUrl' field"
                 )
 
             # Validate transport type
@@ -208,8 +219,8 @@ class SmitheryAPIClient:
             spec = HTTPServerSpec(
                 url=server_url,
                 transport=transport,  # validated above
-                headers=data.get("headers", {}),
-                auth=data.get("auth"),
+                headers={},  # Headers would come from config if needed
+                auth=None,  # Auth would come from config if needed
             )
 
             # Cache the spec

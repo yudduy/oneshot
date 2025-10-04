@@ -169,7 +169,8 @@ class DynamicOrchestrator:
 
             # Get the first result
             server_info = results[0]
-            qualified_name = server_info.get("qualified_name")
+            # API returns camelCase, try both formats
+            qualified_name = server_info.get("qualifiedName") or server_info.get("qualified_name")
 
             if not qualified_name:
                 return False
@@ -205,36 +206,40 @@ class DynamicOrchestrator:
             >>> response = await orchestrator.chat("Search GitHub for MCP servers")
             >>> print(response)
         """
-        # Build agent if not already built
-        if self.graph is None:
-            await self._rebuild_agent()
-
         # Add user message to history
         self.messages.append({"role": "user", "content": user_message})
 
-        # Invoke agent with full message history
-        result = await self.graph.ainvoke({"messages": self.messages})
+        # If no servers yet, create a synthetic "no tools" response to trigger discovery
+        if not self.servers:
+            final_text = "I don't have access to any tools yet to help with this request."
+        else:
+            # Build agent if not already built
+            if self.graph is None:
+                await self._rebuild_agent()
 
-        # Extract final response
-        final_message = result.get("messages", [])[-1] if result.get("messages") else None
-        final_text = ""
+            # Invoke agent with full message history
+            result = await self.graph.ainvoke({"messages": self.messages})
 
-        if final_message:
-            content = getattr(final_message, "content", None)
-            if isinstance(content, str):
-                final_text = content
-            elif isinstance(content, list) and content and isinstance(content[0], dict):
-                final_text = content[0].get("text", str(content))
-            else:
-                final_text = str(final_message)
+            # Extract final response
+            final_message = result.get("messages", [])[-1] if result.get("messages") else None
+            final_text = ""
+
+            if final_message:
+                content = getattr(final_message, "content", None)
+                if isinstance(content, str):
+                    final_text = content
+                elif isinstance(content, list) and content and isinstance(content[0], dict):
+                    final_text = content[0].get("text", str(content))
+                else:
+                    final_text = str(final_message)
 
         # Add assistant response to history
         self.messages.append({"role": "assistant", "content": final_text})
 
         # Check if agent needs tools
         if self._needs_tools(final_text):
-            # Extract what capability is needed
-            capability = self._extract_capability(final_text)
+            # Extract what capability is needed from the user's message
+            capability = self._extract_capability(user_message)
 
             if capability:
                 # Try to discover and add the server
