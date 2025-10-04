@@ -255,3 +255,182 @@ async def test_rebuild_handles_build_failure() -> None:
         # Graph and loader should remain None
         assert orchestrator.graph is None
         assert orchestrator.loader is None
+
+
+# ============================================================================
+# Tool Detection Tests
+# ============================================================================
+
+
+def test_needs_tools_detects_missing_access() -> None:
+    """Test detection of 'I don't have access to' pattern."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I don't have access to GitHub APIs to complete this task."
+    assert orchestrator._needs_tools(response) is True
+
+
+def test_needs_tools_detects_cannot() -> None:
+    """Test detection of 'I cannot' pattern."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I cannot search GitHub repositories without the appropriate tools."
+    assert orchestrator._needs_tools(response) is True
+
+
+def test_needs_tools_detects_unable() -> None:
+    """Test detection of 'I'm unable to' pattern."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I'm unable to access weather data without a weather API tool."
+    assert orchestrator._needs_tools(response) is True
+
+
+def test_needs_tools_detects_no_tools() -> None:
+    """Test detection of 'no tools available' pattern."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "There are no tools available for database queries."
+    assert orchestrator._needs_tools(response) is True
+
+
+def test_needs_tools_false_on_normal_response() -> None:
+    """Test that normal responses don't trigger tool detection."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "The result of 2 + 2 is 4."
+    assert orchestrator._needs_tools(response) is False
+
+
+def test_needs_tools_false_on_success() -> None:
+    """Test that successful tool usage doesn't trigger detection."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I used the GitHub API to find 5 repositories matching your query."
+    assert orchestrator._needs_tools(response) is False
+
+
+def test_needs_tools_case_insensitive() -> None:
+    """Test that detection is case-insensitive."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I DON'T HAVE ACCESS to the required tools."
+    assert orchestrator._needs_tools(response) is True
+
+
+def test_extract_capability_from_github() -> None:
+    """Test extraction of 'github' capability."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I don't have access to GitHub to search repositories."
+    capability = orchestrator._extract_capability(response)
+    assert capability == "github"
+
+
+def test_extract_capability_from_weather() -> None:
+    """Test extraction of 'weather' capability."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I cannot get weather information without proper tools."
+    capability = orchestrator._extract_capability(response)
+    assert capability == "weather"
+
+
+def test_extract_capability_from_database() -> None:
+    """Test extraction of 'database' capability."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I'm unable to query the database without database tools."
+    capability = orchestrator._extract_capability(response)
+    assert capability == "database"
+
+
+def test_extract_capability_returns_none_when_unclear() -> None:
+    """Test that capability extraction returns None when unclear."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I cannot complete this task."
+    capability = orchestrator._extract_capability(response)
+    assert capability is None
+
+
+def test_extract_capability_handles_multiple_keywords() -> None:
+    """Test that we extract the most relevant capability."""
+    from deepmcpagent.orchestrator import DynamicOrchestrator
+
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",
+        initial_servers={},
+        smithery_key="test_key",
+    )
+
+    response = "I don't have GitHub or weather tools available."
+    capability = orchestrator._extract_capability(response)
+    # Should extract at least one (github or weather)
+    assert capability in ("github", "weather")
