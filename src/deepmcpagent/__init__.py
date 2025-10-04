@@ -8,6 +8,7 @@ from .config import (
     StdioServerSpec,
     servers_to_mcp_config,
 )
+from .orchestrator import DynamicOrchestrator
 from .registry import RegistryError, SmitheryAPIClient
 from .tools import MCPToolLoader, ToolInfo
 
@@ -22,4 +23,5 @@ __all__ = [
     "build_deep_agent",
     "SmitheryAPIClient",
     "RegistryError",
+    "DynamicOrchestrator",
 ]
