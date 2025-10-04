@@ -103,6 +103,75 @@ orchestrator.servers   # Active MCP servers (mutable)
 orchestrator.graph     # Agent graph (rebuilt when servers change)
 ```
 
+### Known Limitations
+
+#### Smithery-Hosted Servers Require OAuth
+
+**Problem:** Servers hosted on `server.smithery.ai` require OAuth 2.1 authentication with PKCE flow, which is not currently supported by the Python MCP SDK.
+
+**Impact:**
+- Many servers in the Smithery registry cannot be used via dynamic discovery
+- Agent will receive a `RegistryError` explaining the OAuth requirement
+- Discovery continues - agent may find alternative self-hosted servers
+
+**Example Error:**
+```
+⚠️  Cannot add '@ref-tools/ref-tools-mcp' for research:
+   Server '@ref-tools/ref-tools-mcp' is hosted on Smithery and requires
+   OAuth 2.1 authentication (not currently supported in Python MCP SDK).
+💡 Tip: You can manually configure this server if you have credentials,
+   or try a different query to find alternative servers.
+```
+
+**Workarounds:**
+1. **Use pre-configured servers**: Set `TAVILY_API_KEY` for web search (doesn't require OAuth)
+2. **Self-host servers**: Deploy MCP servers yourself with simple token auth
+3. **Manual configuration**: If you have OAuth tokens, manually configure via `--http` flag
+4. **Wait for SDK support**: Track [smithery-ai/cli#336](https://github.com/smithery-ai/cli/issues/336)
+
+**What Works:**
+- ✅ Self-hosted MCP servers (via HTTP/SSE)
+- ✅ Servers with simple auth (API key in URL/header)
+- ✅ Public servers without auth
+- ✅ Tavily, Brave Search (pre-configured with env vars)
+
+**What Doesn't Work:**
+- ❌ Smithery-hosted servers (`server.smithery.ai/*`)
+- ❌ OAuth 2.1 protected servers
+- ❌ Servers requiring browser-based login
+
+#### Server Configuration Requirements
+
+Some MCP servers (even self-hosted) require configuration like API keys. The Smithery API returns `configSchema` indicating required fields, but the current implementation:
+- Detects the requirement (shows in error message)
+- Cannot automatically prompt for user input
+- Cannot inject credentials at runtime
+
+**Future Enhancement:** Auto-prompt users for required API keys during discovery.
+
+### Recommended Server Setup
+
+For best results with dynamic discovery:
+
+**Option 1: Pre-configure Essential Servers**
+```bash
+export TAVILY_API_KEY="tvly-..."  # Web search
+export BRAVE_API_KEY="..."        # Alternative web search
+export OPENAI_API_KEY="..."       # LLM provider
+```
+
+**Option 2: Use Hybrid Mode**
+```bash
+# Start with Tavily + custom server
+deepmcpagent run-dynamic \
+  --model-id "openai:gpt-4" \
+  --smithery-key "sk_..." \
+  --http name=custom url=http://localhost:8000/mcp
+```
+
+**Option 3: Self-Host Popular Servers**
+Deploy your own instances of popular MCP servers without OAuth dependencies.
+
 ### Example Files
 
 - `examples/dynamic_agent.py` - Full example with 3 discovery scenarios

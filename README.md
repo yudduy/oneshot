@@ -100,8 +100,11 @@ pip install "deepmcpagent[deep,dev]"
 # Set up your API keys
 export SMITHERY_API_KEY="your_smithery_key"  # Get from https://smithery.ai
 export OPENAI_API_KEY="your_openai_key"      # Or any other LLM provider
+export TAVILY_API_KEY="tvly-..."            # Optional: Get from https://tavily.com for web search
 
-# Run dynamic agent (starts with ZERO servers)
+# Run dynamic agent
+# With Tavily: starts with web search capability pre-configured
+# Without Tavily: starts with zero servers, discovers on-demand
 deepmcpagent run-dynamic \
   --model-id "openai:gpt-4" \
   --smithery-key "$SMITHERY_API_KEY"
@@ -110,11 +113,15 @@ deepmcpagent run-dynamic \
 python examples/dynamic_agent.py
 ```
 
+**💡 Pro Tip:** Set `TAVILY_API_KEY` to enable instant web search without discovery delay!
+
 **What happens:**
-1. **You:** "Search GitHub for MCP servers"
-2. **Agent:** Detects it needs GitHub tools → searches Smithery → finds `@smithery-ai/github` → adds server → retries
-3. **Agent:** Successfully executes GitHub search with newly discovered tools
-4. **Follow-up:** "How many stars does the first repo have?" → uses same GitHub server
+1. **You (with Tavily):** "Research the latest AI developments"
+   - **Agent:** Uses pre-configured Tavily → instant web search → comprehensive results ✓
+2. **You:** "Search GitHub for MCP servers"
+   - **Agent:** Detects needs GitHub tools → searches Smithery → discovers server → retries → success ✓
+3. **Follow-up:** "How many stars does the first repo have?"
+   - **Agent:** Uses already-discovered GitHub server → instant response ✓
 
 ### Static Mode (Pre-configured Servers)
 

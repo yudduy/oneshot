@@ -183,8 +183,19 @@ class DynamicOrchestrator:
 
             return True
 
-        except Exception:
-            # Silently fail if discovery fails
+        except Exception as exc:
+            # Check if it's a RegistryError (e.g., Smithery OAuth server)
+            from .registry import RegistryError
+
+            if isinstance(exc, RegistryError):
+                # User-friendly error message for incompatible servers
+                print(f"⚠️  Cannot add '{qualified_name}' for {capability}:")
+                print(f"   {exc}")
+                print(
+                    f"💡 Tip: You can manually configure this server if you have credentials,"
+                )
+                print(f"   or try a different query to find alternative servers.")
+            # Otherwise silently fail for other discovery errors
             return False
 
     async def chat(self, user_message: str) -> str:

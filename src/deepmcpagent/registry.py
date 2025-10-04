@@ -209,6 +209,23 @@ class SmitheryAPIClient:
                     f"Server '{qualified_name}' connection missing 'deploymentUrl' field"
                 )
 
+            # Check if this is a Smithery-hosted server (requires OAuth)
+            if "server.smithery.ai" in server_url:
+                config_schema = connection.get("configSchema", {})
+                required = config_schema.get("required", [])
+
+                msg = (
+                    f"Server '{qualified_name}' is hosted on Smithery and requires "
+                    f"OAuth 2.1 authentication (not currently supported in Python MCP SDK). "
+                )
+                if required:
+                    msg += f"Additionally requires config: {', '.join(required)}. "
+                msg += (
+                    f"Consider using a self-hosted alternative or manually configuring "
+                    f"this server with proper credentials."
+                )
+                raise RegistryError(msg)
+
             # Validate transport type
             if transport not in ("http", "streamable-http", "sse"):
                 raise RegistryError(

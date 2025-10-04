@@ -61,6 +61,41 @@ def _parse_kv(opts: list[str]) -> dict[str, str]:
     return out
 
 
+def _get_default_servers() -> dict[str, ServerSpec]:
+    """Get default pre-configured servers from environment variables.
+
+    This function checks for environment variables to auto-configure
+    common MCP servers that don't require OAuth authentication.
+
+    Returns:
+        Dictionary of pre-configured server specifications.
+
+    Environment Variables:
+        TAVILY_API_KEY: If set, configures Tavily web search server.
+
+    Example:
+        >>> import os
+        >>> os.environ["TAVILY_API_KEY"] = "tvly-..."
+        >>> servers = _get_default_servers()
+        >>> "tavily" in servers
+        True
+    """
+    import os
+
+    servers: dict[str, ServerSpec] = {}
+
+    # Tavily web search (if API key is available)
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    if tavily_key:
+        servers["tavily"] = HTTPServerSpec(
+            url=f"https://mcp.tavily.com/mcp/?tavilyApiKey={tavily_key}",
+            transport="http",
+        )
+        console.print("[dim]✓ Auto-configured Tavily web search from TAVILY_API_KEY[/dim]")
+
+    return servers
+
+
 def _merge_servers(stdios: list[str], https: list[str]) -> dict[str, ServerSpec]:
     """
     Convert flat lists of block strings into server specs.
@@ -331,8 +366,14 @@ def run_dynamic(
     Then ask: "Search GitHub for MCP servers"
     → Agent will auto-discover and add the GitHub MCP server!
     """
-    # Parse initial servers (optional)
-    servers = _merge_servers([], http or [])
+    # Get default pre-configured servers (e.g., Tavily from env)
+    default_servers = _get_default_servers()
+
+    # Parse user-provided servers (optional)
+    user_servers = _merge_servers([], http or [])
+
+    # Merge: user servers override defaults
+    servers = {**default_servers, **user_servers}
 
     async def _chat() -> None:
         # Create dynamic orchestrator
