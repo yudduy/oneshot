@@ -27,6 +27,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+# Suppress known third-party deprecation warnings BEFORE importing agent modules
+from ._warnings import suppress_known_warnings
+
+suppress_known_warnings()
+
 from .agent import build_deep_agent
 from .config import HTTPServerSpec, ServerSpec, StdioServerSpec
 from .orchestrator import DynamicOrchestrator
