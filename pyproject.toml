@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel", "setuptools-scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepmcpagent"
+name = "oneshotmcp"
 dynamic = ["version"]
-description = "DeepMCPAgent: LangChain/LangGraph agents powered by MCP tools over FastMCP."
+description = "OneShotMCP: One prompt. Zero setup. Infinite MCP tools."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -55,7 +55,7 @@ dev = [
 ]
 
 [project.scripts]
-deepmcpagent = "deepmcpagent.cli:app"
+oneshot = "oneshotmcp.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/cryxnet/deepmcpagent"
@@ -63,13 +63,13 @@ Issues = "https://github.com/cryxnet/deepmcpagent/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepmcpagent*"]
+include = ["oneshotmcp*"]
 
 [tool.setuptools.package-dir]
 "" = "src"
 
 [tool.setuptools.package-data]
-deepmcpagent = ["py.typed"]
+oneshotmcp = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.10"
