@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DeepMCPAgent is a LangChain/LangGraph agent library that dynamically discovers and uses tools from MCP (Model Context Protocol) servers over HTTP/SSE. The library is model-agnostic and supports any LangChain chat model.
+OneShotMCP (formerly DeepMCPAgent) is a LangChain/LangGraph agent library that dynamically discovers and uses tools from MCP (Model Context Protocol) servers over HTTP/SSE. The library is model-agnostic and supports any LangChain chat model.
+
+**Package Name:** `oneshotmcp`
+**CLI Command:** `oneshot`
+**Default Model:** `openai:gpt-4.1-nano` (configurable via `ONESHOT_MODEL` env var)
 
 ## Key Architecture
 
@@ -23,9 +27,9 @@ MCP Server → FastMCP Client → `list_tools()` → JSON-Schema (inputSchema) �
 - **Fallback**: LangGraph ReAct agent (always available)
 - Model is REQUIRED (no fallback) — accepts string provider-id or LangChain model instance
 
-## Dynamic Tool Discovery (NEW)
+## Dynamic Tool Discovery
 
-DeepMCPAgent now supports **automatic MCP server discovery** via the `DynamicOrchestrator`. When the agent needs a tool it doesn't have, it can:
+OneShotMCP supports **automatic MCP server discovery** via the `DynamicOrchestrator`. When the agent needs a tool it doesn't have, it can:
 
 1. **Detect** the missing capability (pattern matching on LLM responses)
 2. **Search** the Smithery registry for matching MCP servers
@@ -36,7 +40,7 @@ DeepMCPAgent now supports **automatic MCP server discovery** via the `DynamicOrc
 
 - **`DynamicOrchestrator`** (`orchestrator.py`) - Manages conversation state, server lifecycle, and dynamic discovery
 - **`SmitheryAPIClient`** (`registry.py`) - Client for searching and fetching MCP servers from Smithery
-- **`run-dynamic` CLI command** - Interactive mode with auto-discovery enabled
+- **`oneshot` CLI command** - Simplified single-command interface with auto-discovery enabled by default
 
 ### How It Works
 
@@ -60,10 +64,16 @@ Agent: "Here are 10 MCP servers on GitHub..."  [Success!]
 
 **CLI:**
 ```bash
-deepmcpagent run-dynamic \
-  --model-id "openai:gpt-4" \
-  --smithery-key "sk_..." \
-  --http name=math url=http://localhost:8000/mcp  # Optional initial servers
+# Set up environment variables
+export SMITHERY_API_KEY="sk_..."
+export TAVILY_API_KEY="tvly_..."  # Optional: pre-configures web search
+export ONESHOT_MODEL="openai:gpt-4.1-nano"  # Optional: defaults to this
+
+# Run the agent (that's it!)
+oneshot
+
+# Or with custom initial server
+oneshot --http "name=math url=http://localhost:8000/mcp"
 
 # Then ask: "Search GitHub for MCP servers"
 # → Auto-discovers and adds GitHub server!
@@ -71,12 +81,13 @@ deepmcpagent run-dynamic \
 
 **Python API:**
 ```python
-from deepmcpagent import DynamicOrchestrator, HTTPServerSpec
+from oneshotmcp import DynamicOrchestrator, HTTPServerSpec
 
 orchestrator = DynamicOrchestrator(
-    model="openai:gpt-4",
+    model="openai:gpt-4.1-nano",
     initial_servers={},  # Start with no servers
     smithery_key="sk_...",
+    verbose=True,  # Show LLM reasoning and tool calls
 )
 
 response = await orchestrator.chat("What's the weather in SF?")
@@ -149,6 +160,29 @@ Some MCP servers (even self-hosted) require configuration like API keys. The Smi
 
 **Future Enhancement:** Auto-prompt users for required API keys during discovery.
 
+#### Context Length Management & Tool Filtering
+
+**Problem:** Some MCP servers expose dozens or hundreds of tools (e.g., Context7 with library-specific documentation tools). Loading all tool schemas into the LLM context can exceed token limits, especially with smaller models like `gpt-4.1-nano` (8K context).
+
+**Solution:** OneShotMCP implements smart tool filtering:
+
+1. **MAX_TOOLS_PER_SERVER** constant limits tools loaded per server (default: 30)
+2. **Query-based filtering** loads only tools matching user query keywords
+3. **Tool count logging** shows how many tools were loaded vs available (in verbose mode)
+
+**Example:**
+```
+[BUILD] Rebuilding agent with 2 server(s)...
+[BUILD] Loaded 25/150 tools from context7 (filtered by relevance)
+[BUILD] Loaded 8/8 tools from tavily
+[BUILD] Agent ready with 33 tool(s) total
+```
+
+**Configuration:**
+- Set `MAX_TOOLS_PER_SERVER` in `config.py` to adjust limit
+- Increase for models with larger context windows (Claude Sonnet 3.5: 200K)
+- Decrease for smaller models (gpt-4.1-nano: 8K)
+
 ### Recommended Server Setup
 
 For best results with dynamic discovery:
@@ -163,10 +197,9 @@ export OPENAI_API_KEY="..."       # LLM provider
 **Option 2: Use Hybrid Mode**
 ```bash
 # Start with Tavily + custom server
-deepmcpagent run-dynamic \
-  --model-id "openai:gpt-4" \
-  --smithery-key "sk_..." \
-  --http name=custom url=http://localhost:8000/mcp
+export SMITHERY_API_KEY="sk_..."
+export TAVILY_API_KEY="tvly_..."
+oneshot --http "name=custom url=http://localhost:8000/mcp"
 ```
 
 **Option 3: Self-Host Popular Servers**
@@ -217,15 +250,22 @@ python examples/use_agent.py
 
 ### Running CLI
 ```bash
-# List tools from HTTP server
-deepmcpagent list-tools \
-  --http name=math url=http://127.0.0.1:8000/mcp transport=http \
-  --model-id "openai:gpt-4.1"
+# Set up environment
+export SMITHERY_API_KEY="sk_..."
+export OPENAI_API_KEY="sk-..."  # For gpt-4.1-nano
 
-# Interactive agent session
-deepmcpagent run \
-  --http name=math url=http://127.0.0.1:8000/mcp transport=http \
-  --model-id "openai:gpt-4.1"
+# Run with dynamic discovery (default mode)
+oneshot
+
+# Run with custom initial server
+oneshot --http "name=math url=http://127.0.0.1:8000/mcp transport=http"
+
+# Show verbose logging (default: enabled)
+oneshot --verbose
+
+# Use different model
+export ONESHOT_MODEL="anthropic:claude-sonnet-3.5-v2"
+oneshot
 ```
 
 ## Code Standards
