@@ -1,9 +1,10 @@
 <!-- Banner / Title -->
 <div align="center">
-  <img src="docs/images/icon.png" width="120" alt="DeepMCPAgent Logo"/>
+  <img src="docs/images/icon.png" width="120" alt="OneShotMCP Logo"/>
 
-  <h1>🤖 DeepMCPAgent</h1>
-  <p><strong>Model-agnostic LangChain/LangGraph agents powered entirely by <a href="https://modelcontextprotocol.io/">MCP</a> tools over HTTP/SSE.</strong></p>
+  <h1>🤖 OneShotMCP</h1>
+  <p><strong>One prompt. Zero setup. Infinite MCP tools.</strong></p>
+  <p><em>Model-agnostic LangChain/LangGraph agents with <strong>automatic MCP server discovery</strong> via Smithery registry.</em></p>
 
   <!-- Badges -->
   <p>
@@ -16,13 +17,13 @@
 
 <p>
   <a href="https://www.producthunt.com/products/deep-mcp-agents?utm_source=badge-featured&utm_medium=badge&utm_source=badge-deep-mcp-agents" target="_blank">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1011071&theme=light" alt="Deep MCP Agents on Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" />
+    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1011071&theme=light" alt="OneShotMCP on Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" />
   </a>
-</p> 
+</p>
   </p>
 
   <p>
-    <em>Discover MCP tools dynamically. Bring your own LangChain model. Build production-ready agents—fast.</em>
+    <em>Ask for GitHub data → agent auto-discovers GitHub MCP server → executes your task. No manual configuration.</em>
   </p>
 
   <p>
@@ -32,16 +33,32 @@
 
 <hr/>
 
-## ✨ Why DeepMCPAgent?
+## ✨ Why OneShotMCP?
 
-- 🔌 **Zero manual tool wiring** — tools are discovered dynamically from MCP servers (HTTP/SSE)
-- 🌐 **External APIs welcome** — connect to remote MCP servers (with headers/auth)
-- 🧠 **Model-agnostic** — pass any LangChain chat model instance (OpenAI, Anthropic, Ollama, Groq, local, …)
-- ⚡ **DeepAgents (optional)** — if installed, you get a deep agent loop; otherwise robust LangGraph ReAct fallback
-- 🛠️ **Typed tool args** — JSON-Schema → Pydantic → LangChain `BaseTool` (typed, validated calls)
-- 🧪 **Quality bar** — mypy (strict), ruff, pytest, GitHub Actions, docs
+### 🚀 NEW: Automatic Tool Discovery
 
-> **MCP first.** Agents shouldn’t hardcode tools — they should **discover** and **call** them. DeepMCPAgent builds that bridge.
+**The Problem:** Traditional agents require you to manually configure every MCP server upfront.
+
+**OneShotMCP Solution:** Agents automatically discover and add MCP servers from the [Smithery registry](https://smithery.ai) when they need capabilities they don't have.
+
+```python
+# You: "Search GitHub for MCP servers"
+# Agent: "I don't have GitHub tools... searching Smithery... found @smithery-ai/github... adding server... retrying..."
+# Agent: "Here are 10 MCP servers on GitHub..."
+```
+
+### Core Features
+
+- 🎯 **One-shot tool discovery** — ask for anything, agent finds the right MCP server automatically
+- 🔌 **Zero manual setup** — start with zero servers, agent discovers what it needs on-the-fly
+- 📦 **Smithery registry integration** — access 100+ MCP servers via automatic search
+- 🧠 **Model-agnostic** — works with any LangChain model (OpenAI, Anthropic, Ollama, Groq, local, …)
+- ⚡ **DeepAgents support** — uses DeepAgents loop if installed, LangGraph ReAct otherwise
+- 🛠️ **Type-safe** — JSON-Schema → Pydantic → LangChain `BaseTool` (fully typed, validated)
+- 🔄 **Stateful conversations** — messages persist across agent rebuilds when adding new servers
+- 🧪 **Production-ready** — strict mypy, ruff, pytest, full test coverage
+
+> **MCP evolved.** Agents shouldn't just discover tools from configured servers — they should **discover the servers themselves**. OneShotMCP completes the vision.
 
 ---
 
@@ -75,29 +92,98 @@ pip install "deepmcpagent[deep,dev]"
 
 ## 🚀 Quickstart
 
-### 1) Start a sample MCP server (HTTP)
+### Dynamic Mode (Auto-Discovery) - NEW! ✨
+
+**Zero configuration needed** — the agent discovers MCP servers on-demand from the Smithery registry.
 
 ```bash
-python examples/servers/math_server.py
+# Set up your API keys
+export SMITHERY_API_KEY="your_smithery_key"  # Get from https://smithery.ai
+export OPENAI_API_KEY="your_openai_key"      # Or any other LLM provider
+
+# Run dynamic agent (starts with ZERO servers)
+deepmcpagent run-dynamic \
+  --model-id "openai:gpt-4" \
+  --smithery-key "$SMITHERY_API_KEY"
+
+# Or try the example script
+python examples/dynamic_agent.py
 ```
 
-This serves an MCP endpoint at: **[http://127.0.0.1:8000/mcp](http://127.0.0.1:8000/mcp)**
+**What happens:**
+1. **You:** "Search GitHub for MCP servers"
+2. **Agent:** Detects it needs GitHub tools → searches Smithery → finds `@smithery-ai/github` → adds server → retries
+3. **Agent:** Successfully executes GitHub search with newly discovered tools
+4. **Follow-up:** "How many stars does the first repo have?" → uses same GitHub server
 
-### 2) Run the example agent (with fancy console output)
+### Static Mode (Pre-configured Servers)
+
+If you prefer to specify servers upfront:
 
 ```bash
+# 1) Start a sample MCP server (HTTP)
+python examples/servers/math_server.py
+# Serves at: http://127.0.0.1:8000/mcp
+
+# 2) Run the agent with pre-configured server
 python examples/use_agent.py
 ```
 
-**What you’ll see:**
+**What you'll see:**
 
 ![screenshot](/docs/images/screenshot_output.png)
 
 ---
 
-## 🧑‍💻 Bring-Your-Own Model (BYOM)
+## 🧑‍💻 Usage Guide
 
-DeepMCPAgent lets you pass **any LangChain chat model instance** (or a provider id string if you prefer `init_chat_model`):
+### Dynamic Discovery (Python API)
+
+The `DynamicOrchestrator` automatically discovers and adds MCP servers when the agent needs capabilities it doesn't have:
+
+```python
+import asyncio
+from deepmcpagent import DynamicOrchestrator
+
+async def main():
+    # Create orchestrator with zero initial servers
+    orchestrator = DynamicOrchestrator(
+        model="openai:gpt-4",              # Or any LangChain model instance
+        initial_servers={},                # Start with nothing!
+        smithery_key="your_smithery_key",  # From https://smithery.ai
+        instructions="You are a helpful assistant."
+    )
+
+    # Ask for something requiring GitHub tools (not configured)
+    response = await orchestrator.chat("Search GitHub for MCP servers")
+    # → Agent detects missing tools → searches Smithery → adds GitHub server → retries
+    print(response)
+
+    # Follow-up uses the same GitHub server
+    response = await orchestrator.chat("How many stars does the first repo have?")
+    print(response)
+
+    # Ask about weather (triggers discovery of weather server)
+    response = await orchestrator.chat("What's the weather in San Francisco?")
+    print(response)
+
+    print(f"Servers discovered: {list(orchestrator.servers.keys())}")
+    # → ['github', 'weather']
+
+asyncio.run(main())
+```
+
+**Key Benefits:**
+- 🎯 Start with **zero servers** — no upfront configuration
+- 🔄 **State persists** across rebuilds — conversation history maintained
+- 🔍 **Automatic capability detection** — pattern matching on agent responses
+- 📦 **Smithery integration** — access to 100+ MCP servers
+
+### Static Configuration (Python API)
+
+For production scenarios where you know which servers you need upfront.
+
+OneShotMCP lets you pass **any LangChain chat model instance** (or a provider id string via `init_chat_model`):
 
 ```python
 import asyncio
@@ -140,16 +226,44 @@ asyncio.run(main())
 
 ## 🖥️ CLI (no Python required)
 
+### Dynamic Mode (Auto-Discovery)
+
 ```bash
-# list tools from one or more HTTP servers
+# Interactive agent with automatic MCP server discovery
+deepmcpagent run-dynamic \
+  --model-id "openai:gpt-4" \
+  --smithery-key "$SMITHERY_API_KEY"
+
+# With optional initial servers (hybrid mode)
+deepmcpagent run-dynamic \
+  --model-id "openai:gpt-4" \
+  --smithery-key "$SMITHERY_API_KEY" \
+  --http name=math url=http://localhost:8000/mcp
+```
+
+**Example interaction:**
+```
+> Search GitHub for MCP servers
+[Agent discovers GitHub server from Smithery...]
+✓ Found 10 repositories...
+
+> What's the weather in San Francisco?
+[Agent discovers weather server...]
+✓ Currently 65°F and sunny...
+```
+
+### Static Mode (Pre-configured Servers)
+
+```bash
+# List tools from pre-configured servers
 deepmcpagent list-tools \
   --http name=math url=http://127.0.0.1:8000/mcp transport=http \
-  --model-id "openai:gpt-4.1"
+  --model-id "openai:gpt-4"
 
-# interactive agent chat (HTTP/SSE servers only)
+# Interactive agent chat with static servers
 deepmcpagent run \
   --http name=math url=http://127.0.0.1:8000/mcp transport=http \
-  --model-id "openai:gpt-4.1"
+  --model-id "openai:gpt-4"
 ```
 
 > The CLI accepts **repeated** `--http` blocks; add `header.X=Y` pairs for auth:
@@ -160,7 +274,56 @@ deepmcpagent run \
 
 ---
 
-## 🧩 Architecture (at a glance)
+## 🧩 How It Works
+
+### Dynamic Discovery Flow
+
+```
+┌─────────────────┐
+│ User Request    │  "Search GitHub for MCP servers"
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ Agent (with 0 servers)                  │
+│ Response: "I don't have GitHub tools"   │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ DynamicOrchestrator Pattern Detection   │
+│ - Detects: "I don't have"               │
+│ - Extracts: "github" from user message  │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ Smithery Registry Search                │
+│ GET /servers?q=github                   │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ Server Discovery                        │
+│ Found: @smithery-ai/github              │
+│ URL: https://server.smithery.ai/.../mcp │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ Agent Rebuild with New Server           │
+│ Servers: {'github': HTTPServerSpec(...)}│
+│ Messages: [preserved conversation]      │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ Retry Original Request                  │
+│ ✓ Successfully executes GitHub search   │
+└─────────────────────────────────────────┘
+```
+
+### Traditional Architecture
 
 ```
 ┌────────────────┐        list_tools / call_tool        ┌─────────────────────────┐
@@ -173,9 +336,13 @@ deepmcpagent run \
   (or DeepAgents)                                    e.g., math, github, search, ...
 ```
 
-- `HTTPServerSpec(...)` → **FastMCP client** (single client, multiple servers)
+**Key Components:**
+- `DynamicOrchestrator` → Manages state, detects missing tools, triggers discovery
+- `SmitheryAPIClient` → Searches Smithery registry, retrieves server specs
+- `HTTPServerSpec(...)` → FastMCP client configuration (single client, multiple servers)
 - **Tool discovery** → JSON-Schema → Pydantic → LangChain `BaseTool`
 - **Agent loop** → DeepAgents (if installed) or LangGraph ReAct fallback
+- **Message persistence** → External storage survives agent rebuilds
 
 ---
 
@@ -510,8 +677,23 @@ Apache-2.0 — see [`LICENSE`](/LICENSE).
   />
 </picture>
 
+---
+
+## 🔮 What's Next?
+
+- [ ] **Smarter capability extraction** — use LLM to analyze user intent instead of keyword matching
+- [ ] **Server authentication** — automatic credential management for discovered servers
+- [ ] **Multi-server orchestration** — parallel tool execution across multiple discovered servers
+- [ ] **Discovery caching** — persist discovered servers across sessions
+- [ ] **Custom registries** — support private MCP server registries beyond Smithery
+
+**Want to contribute?** Check out our [issues](https://github.com/cryxnet/deepmcpagent/issues) or submit a PR!
+
+---
+
 ## 🙏 Acknowledgments
 
-- The [**MCP** community](https://modelcontextprotocol.io/) for a clean protocol.
-- [**LangChain**](https://www.langchain.com/) and [**LangGraph**](https://www.langchain.com/langgraph) for powerful agent runtimes.
-- [**FastMCP**](https://gofastmcp.com/getting-started/welcome) for solid client & server implementations.
+- The [**MCP** community](https://modelcontextprotocol.io/) for a clean, extensible protocol
+- [**Smithery**](https://smithery.ai) for building the MCP server registry that powers OneShotMCP's discovery
+- [**LangChain**](https://www.langchain.com/) and [**LangGraph**](https://www.langchain.com/langgraph) for powerful agent runtimes
+- [**FastMCP**](https://gofastmcp.com/getting-started/welcome) for solid client & server implementations
