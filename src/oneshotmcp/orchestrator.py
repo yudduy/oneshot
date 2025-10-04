@@ -174,6 +174,46 @@ class DynamicOrchestrator:
 
         return None
 
+    def _extract_explicit_mcp_request(self, user_message: str) -> str | None:
+        """Extract explicit MCP server request from user message.
+
+        Detects patterns where user explicitly requests a specific MCP server:
+        - "fetch context7 mcp"
+        - "use github mcp to..."
+        - "get weather server"
+        - "add slack tools"
+
+        Args:
+            user_message: The user's input message.
+
+        Returns:
+            Server name if explicit request detected, None otherwise.
+
+        Example:
+            >>> orchestrator._extract_explicit_mcp_request("fetch context7 mcp and use it")
+            'context7'
+            >>> orchestrator._extract_explicit_mcp_request("what is the weather?")
+            None
+        """
+        message_lower = user_message.lower()
+
+        # Patterns for explicit MCP requests
+        patterns = [
+            r"fetch\s+(\w+)\s+mcp",
+            r"use\s+(\w+)\s+mcp",
+            r"get\s+(\w+)\s+(?:server|mcp)",
+            r"add\s+(\w+)\s+(?:server|tools|mcp)",
+            r"install\s+(\w+)",
+            r"load\s+(\w+)\s+(?:server|mcp)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, message_lower)
+            if match:
+                return match.group(1)  # Return the server name
+
+        return None
+
     async def _discover_and_add_server(self, capability: str) -> bool:
         """Discover and add MCP server for the given capability.
 
@@ -265,6 +305,22 @@ class DynamicOrchestrator:
         """
         # Add user message to history
         self.messages.append({"role": "user", "content": user_message})
+
+        # Check for explicit MCP server request (proactive discovery)
+        explicit_server = self._extract_explicit_mcp_request(user_message)
+        if explicit_server:
+            if self.verbose:
+                print(f"[DISCOVERY] Detected explicit request for '{explicit_server}' MCP server")
+
+            # Proactively discover and add the server
+            success = await self._discover_and_add_server(explicit_server)
+
+            if success:
+                # Rebuild agent with new server
+                await self._rebuild_agent()
+            else:
+                if self.verbose:
+                    print(f"[DISCOVERY] Could not add '{explicit_server}' server")
 
         # If no servers yet, create a synthetic "no tools" response to trigger discovery
         if not self.servers:
