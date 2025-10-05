@@ -1,33 +1,19 @@
 <!-- Banner / Title -->
 <div align="center">
-  <img src="docs/images/icon.png" width="120" alt="OneShotMCP Logo"/>
-
-  <h1>🤖 OneShotMCP</h1>
+  <h1>OneShotMCP</h1>
   <p><strong>One prompt. Zero setup. Infinite MCP tools.</strong></p>
   <p><em>Model-agnostic LangChain/LangGraph agents with <strong>automatic MCP server discovery</strong> via Smithery registry.</em></p>
 
   <!-- Badges -->
   <p>
-    <a href="https://cryxnet.github.io/DeepMCPAgent">
-      <img alt="Docs" src="https://img.shields.io/badge/docs-latest-brightgreen.svg">
-    </a>
     <a href="#"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-blue.svg"></a>
     <a href="#"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
     <a href="#"><img alt="Status" src="https://img.shields.io/badge/status-beta-orange.svg"></a>
 
-<p>
-  <a href="https://www.producthunt.com/products/deep-mcp-agents?utm_source=badge-featured&utm_medium=badge&utm_source=badge-deep-mcp-agents" target="_blank">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1011071&theme=light" alt="OneShotMCP on Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" />
-  </a>
-</p>
   </p>
 
   <p>
     <em>Ask for GitHub data → agent auto-discovers GitHub MCP server → executes your task. No manual configuration.</em>
-  </p>
-
-  <p>
-    📚 <a href="https://cryxnet.github.io/deepmcpagent/">Documentation</a> • 🛠 <a href="https://github.com/cryxnet/deepmcpagent/issues">Issues</a>
   </p>
 </div>
 
@@ -35,7 +21,7 @@
 
 ## ✨ Why OneShotMCP?
 
-### 🚀 NEW: Automatic Tool Discovery
+### Automatic Tool Discovery
 
 **The Problem:** Traditional agents require you to manually configure every MCP server upfront.
 
@@ -93,7 +79,7 @@ pip install "oneshotmcp[deep,dev]"
 
 ## 🚀 Quickstart
 
-### Dynamic Mode (Auto-Discovery) - NEW! ✨
+### Dynamic Mode (Auto-Discovery) 
 
 **Zero configuration needed** — the agent discovers MCP servers on-demand from the Smithery registry.
 
@@ -666,29 +652,6 @@ Apache-2.0 — see [`LICENSE`](/LICENSE).
 
 ---
 
-## ⭐ Stars
-
-<picture>
-  <source
-    media="(prefers-color-scheme: dark)"
-    srcset="
-      https://api.star-history.com/svg?repos=cryxnet/DeepMCPAgent&type=Date&theme=dark
-    "
-  />
-  <source
-    media="(prefers-color-scheme: light)"
-    srcset="
-      https://api.star-history.com/svg?repos=cryxnet/DeepMCPAgent&type=Date
-    "
-  />
-  <img
-    alt="Star History Chart"
-    src="https://api.star-history.com/svg?repos=cryxnet/DeepMCPAgent&type=Date"
-  />
-</picture>
-
----
-
 ## 🔮 What's Next?
 
 - [ ] **Smarter capability extraction** — use LLM to analyze user intent instead of keyword matching
@@ -696,8 +659,6 @@ Apache-2.0 — see [`LICENSE`](/LICENSE).
 - [ ] **Multi-server orchestration** — parallel tool execution across multiple discovered servers
 - [ ] **Discovery caching** — persist discovered servers across sessions
 - [ ] **Custom registries** — support private MCP server registries beyond Smithery
-
-**Want to contribute?** Check out our [issues](https://github.com/cryxnet/deepmcpagent/issues) or submit a PR!
 
 ---
 
