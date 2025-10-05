@@ -691,32 +691,9 @@ class DynamicOrchestrator:
                     )
                     print(f"[ATTEMPT]   Description: {desc}...")
 
-                # Get full server spec
-                spec = await self.smithery.get_server(qualified_name)
-
-                # Add to active servers
-                self.servers[capability] = spec
-
+                # PRIORITY 1: Try local npm installation first (simpler, no OAuth)
                 if self.verbose:
-                    print(
-                        f"[ATTEMPT] ✓ Successfully added '{qualified_name}' as '{capability}' server"
-                    )
-
-                return True
-
-            except OAuthRequired as oauth_exc:
-                # Handle OAuth automatically
-                if self.verbose:
-                    print(f"[ATTEMPT] OAuth required for '{qualified_name}'")
-
-                # Try OAuth flow
-                oauth_success = await self._handle_oauth_flow(oauth_exc, capability)
-                if oauth_success:
-                    return True
-
-                # OAuth failed - try local installation as fallback
-                if self.verbose:
-                    print(f"[ATTEMPT] OAuth failed, attempting local installation...")
+                    print(f"[ATTEMPT] Trying local npm installation first...")
 
                 local_success = await self._try_local_installation(
                     qualified_name=qualified_name,
@@ -725,24 +702,59 @@ class DynamicOrchestrator:
                 if local_success:
                     return True
 
-                # Both OAuth and local installation failed, try next candidate
+                # PRIORITY 2: Local installation failed, try Smithery-hosted with OAuth
+                if self.verbose:
+                    print(f"[ATTEMPT] Local installation failed, trying hosted server...")
+
+                try:
+                    # Get full server spec from Smithery (may require OAuth)
+                    spec = await self.smithery.get_server(qualified_name)
+
+                    # Add to active servers
+                    self.servers[capability] = spec
+
+                    if self.verbose:
+                        print(
+                            f"[ATTEMPT] ✓ Successfully added '{qualified_name}' as '{capability}' server (hosted)"
+                        )
+
+                    return True
+
+                except OAuthRequired as oauth_exc:
+                    # Handle OAuth automatically
+                    if self.verbose:
+                        print(f"[ATTEMPT] Hosted server requires OAuth authentication")
+
+                    # Try OAuth flow
+                    oauth_success = await self._handle_oauth_flow(oauth_exc, capability)
+                    if oauth_success:
+                        return True
+
+                    # OAuth failed
+                    if self.verbose:
+                        print(f"[ATTEMPT] OAuth flow failed")
+
+                except Exception as exc:
+                    # Check if it's a RegistryError (config requirement, etc.)
+                    from .registry import RegistryError
+
+                    if isinstance(exc, RegistryError):
+                        if self.verbose:
+                            print(f"[ATTEMPT] Cannot use hosted server: {exc}")
+                    else:
+                        if self.verbose:
+                            print(f"[ATTEMPT] Error with hosted server: {exc}")
+
+                # Both local and hosted failed, try next candidate
                 if self.verbose:
                     print(f"[ATTEMPT]   Trying next candidate...")
                 continue
 
             except Exception as exc:
-                # Check if it's a RegistryError (config requirement, etc.)
-                from .registry import RegistryError
-
-                if isinstance(exc, RegistryError):
-                    if self.verbose:
-                        print(f"[ATTEMPT] ✗ Cannot use '{qualified_name}': {exc}")
-                        print(f"[ATTEMPT]   Trying next candidate...")
-                else:
-                    if self.verbose:
-                        print(f"[ATTEMPT] ✗ Error with '{qualified_name}': {exc}")
-                        print(f"[ATTEMPT]   Trying next candidate...")
-
+                # Unexpected error in local installation attempt
+                if self.verbose:
+                    print(f"[ATTEMPT] ✗ Unexpected error: {exc}")
+                    print(f"[ATTEMPT]   Trying next candidate...")
                 continue
 
         if self.verbose:

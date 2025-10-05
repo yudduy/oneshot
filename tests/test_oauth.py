@@ -381,7 +381,7 @@ async def test_discover_oauth_metadata() -> None:
         assert config.token_endpoint == "https://auth.example.com/token"
         assert config.scopes == ["read", "write"]
 
-        # Verify correct discovery URL was called
+        # Verify correct discovery URL was called (RFC 8414)
         mock_client.get.assert_called_once()
         call_args = mock_client.get.call_args[0][0]
-        assert call_args == "https://mcp.example.com/.well-known/oauth-protected-resource"
+        assert call_args == "https://mcp.example.com/.well-known/oauth-authorization-server"

@@ -185,12 +185,14 @@ class LocalMCPInstaller:
         self,
         smithery_metadata: dict[str, Any],
         user_config: dict[str, Any],
+        interactive: bool = True,
     ) -> StdioServerSpec | None:
         """Attempt to install MCP server locally.
 
         Args:
             smithery_metadata: Full Smithery server metadata
             user_config: User-provided configuration
+            interactive: Whether to prompt user for missing config (default: True)
 
         Returns:
             StdioServerSpec if installation possible, None otherwise
@@ -212,10 +214,11 @@ class LocalMCPInstaller:
 
         # Extract config requirements
         config_requirements = self.extract_config_requirements(smithery_metadata)
+        required_fields = config_requirements.get("required", [])
+        properties = config_requirements.get("properties", {})
 
         # Auto-populate config from environment variables
         enriched_config = dict(user_config)
-        properties = config_requirements.get("properties", {})
 
         for field, field_props in properties.items():
             if field not in enriched_config:
@@ -225,6 +228,31 @@ class LocalMCPInstaller:
                     if env_value:
                         enriched_config[field] = env_value
 
+        # Interactive prompts for missing required config
+        if interactive:
+            for field in required_fields:
+                if field not in enriched_config:
+                    # Prompt user
+                    field_props = properties.get(field, {})
+                    description = field_props.get("description", field)
+                    env_var = field_props.get("envVar", "")
+
+                    print(f"\n🔑 Configuration required for {package_name}")
+                    print(f"   Field: {field}")
+                    print(f"   Description: {description}")
+                    if env_var:
+                        print(f"   Environment variable: {env_var}")
+                        print(f"   (You can set {env_var} to avoid this prompt)")
+
+                    # Get user input
+                    try:
+                        value = input(f"\nEnter value for {field}: ").strip()
+                        if value:
+                            enriched_config[field] = value
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n\nInstallation cancelled by user")
+                        return None
+
         # Create stdio spec
         try:
             return self.create_stdio_server_spec(
@@ -232,6 +260,7 @@ class LocalMCPInstaller:
                 config_requirements=config_requirements,
                 user_config=enriched_config,
             )
-        except ValueError:
-            # Missing required config
+        except ValueError as exc:
+            # Missing required config even after prompts
+            print(f"\n❌ Cannot install {package_name}: {exc}")
             return None

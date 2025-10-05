@@ -16,33 +16,17 @@ from tests.fixtures.mock_oauth import MockOAuthServer
 
 @pytest.mark.asyncio
 async def test_full_oauth_flow_with_mock_server() -> None:
-    """Test complete OAuth flow: discovery → auth → token exchange → storage."""
-    # Setup mock OAuth server
-    oauth_server = MockOAuthServer(
-        base_url="https://oauth.smithery.ai",
-        resource_url="https://server.smithery.ai/mcp",
-    )
+    """Test complete OAuth flow with Smithery hardcoded endpoints."""
+    # For Smithery-hosted servers, we use hardcoded endpoints (no discovery needed)
+    resource_url = "https://server.smithery.ai/mcp"
 
-    # Mock RFC 9728 discovery
-    discovery_metadata = oauth_server.get_protected_resource_metadata()
+    # Discover OAuth metadata (should use Smithery hardcoded fallback)
+    oauth_config = await discover_oauth_metadata(resource_url)
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = AsyncMock()
-        mock_client_class.return_value.__aenter__.return_value = mock_client
-
-        # Mock discovery response
-        discovery_response = Mock()
-        discovery_response.status_code = 200
-        discovery_response.json.return_value = discovery_metadata
-        discovery_response.raise_for_status = Mock()
-
-        mock_client.get = AsyncMock(return_value=discovery_response)
-
-        # Discover OAuth metadata
-        oauth_config = await discover_oauth_metadata(oauth_server.resource_url)
-
-        assert oauth_config.authorization_endpoint == discovery_metadata["authorization_endpoint"]
-        assert oauth_config.token_endpoint == discovery_metadata["token_endpoint"]
+    # Verify Smithery hardcoded endpoints are used
+    assert oauth_config.authorization_endpoint == "https://auth.smithery.ai/oauth/authorize"
+    assert oauth_config.token_endpoint == "https://auth.smithery.ai/oauth/token"
+    assert oauth_config.resource == resource_url
 
 
 @pytest.mark.asyncio
@@ -77,13 +61,13 @@ async def test_registry_oauth_required_exception() -> None:
             }
             server_metadata_response.raise_for_status = Mock()
 
-            # Mock OAuth discovery response
+            # Mock OAuth discovery response (Smithery uses auth.smithery.ai)
             oauth_discovery_response = Mock()
             oauth_discovery_response.status_code = 200
             oauth_discovery_response.json.return_value = {
                 "resource": "https://server.smithery.ai/test/mcp",
-                "authorization_endpoint": "https://oauth.smithery.ai/authorize",
-                "token_endpoint": "https://oauth.smithery.ai/token",
+                "authorization_endpoint": "https://auth.smithery.ai/oauth/authorize",
+                "token_endpoint": "https://auth.smithery.ai/oauth/token",
             }
             oauth_discovery_response.raise_for_status = Mock()
 
@@ -96,10 +80,10 @@ async def test_registry_oauth_required_exception() -> None:
             with pytest.raises(OAuthRequired) as exc_info:
                 await client.get_server("@test/server")
 
-            # Verify exception contains OAuth config
+            # Verify exception contains OAuth config (Smithery hardcoded endpoints)
             assert exc_info.value.server_name == "@test/server"
-            assert exc_info.value.oauth_config.authorization_endpoint == "https://oauth.smithery.ai/authorize"
-            assert exc_info.value.oauth_config.token_endpoint == "https://oauth.smithery.ai/token"
+            assert exc_info.value.oauth_config.authorization_endpoint == "https://auth.smithery.ai/oauth/authorize"
+            assert exc_info.value.oauth_config.token_endpoint == "https://auth.smithery.ai/oauth/token"
             # Note: In production, the orchestrator catches this and handles OAuth automatically
 
 

@@ -678,8 +678,20 @@ async def discover_oauth_metadata(resource_url: str) -> OAuthConfig:
     parsed = urlparse(resource_url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-    # RFC 9728 discovery endpoint
-    discovery_url = f"{base_url}/.well-known/oauth-protected-resource"
+    # Check if this is a Smithery-hosted server (use known endpoints)
+    if "server.smithery.ai" in resource_url:
+        # Smithery uses centralized auth server
+        return OAuthConfig(
+            authorization_endpoint="https://auth.smithery.ai/oauth/authorize",
+            token_endpoint="https://auth.smithery.ai/oauth/token",
+            resource=resource_url,
+            scopes=["read", "write"],
+            token_types_supported=["Bearer"],
+        )
+
+    # RFC 8414 Authorization Server Metadata (MCP specification)
+    # Try primary endpoint first
+    discovery_url = f"{base_url}/.well-known/oauth-authorization-server"
 
     async with httpx.AsyncClient() as client:
         try:
@@ -687,19 +699,35 @@ async def discover_oauth_metadata(resource_url: str) -> OAuthConfig:
             response.raise_for_status()
             metadata = response.json()
 
-            # Extract required fields
+            # Extract required fields from RFC 8414 format
             return OAuthConfig(
                 authorization_endpoint=metadata["authorization_endpoint"],
                 token_endpoint=metadata["token_endpoint"],
-                resource=metadata.get("resource", resource_url),
+                resource=resource_url,  # RFC 8414 doesn't include resource
                 scopes=metadata.get("scopes_supported", []),
                 token_types_supported=metadata.get("token_types_supported", ["Bearer"]),
             )
 
-        except httpx.HTTPStatusError as exc:
-            raise OAuthError(
-                f"OAuth discovery failed ({exc.response.status_code}): {exc.response.text}"
-            ) from exc
+        except httpx.HTTPStatusError:
+            # Fallback: Try RFC 9728 Protected Resource Metadata
+            fallback_url = f"{base_url}/.well-known/oauth-protected-resource"
+            try:
+                response = await client.get(fallback_url)
+                response.raise_for_status()
+                metadata = response.json()
+
+                return OAuthConfig(
+                    authorization_endpoint=metadata["authorization_endpoint"],
+                    token_endpoint=metadata["token_endpoint"],
+                    resource=metadata.get("resource", resource_url),
+                    scopes=metadata.get("scopes_supported", []),
+                    token_types_supported=metadata.get("token_types_supported", ["Bearer"]),
+                )
+            except Exception as exc:
+                raise OAuthError(
+                    f"OAuth discovery failed at both RFC 8414 and RFC 9728 endpoints: {exc}"
+                ) from exc
+
         except KeyError as exc:
             raise OAuthError(f"Invalid OAuth metadata (missing {exc})") from exc
         except Exception as exc:
