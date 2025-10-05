@@ -77,22 +77,27 @@ def servers_to_mcp_config(servers: Mapping[str, ServerSpec]) -> dict[str, dict[s
     cfg: dict[str, dict[str, object]] = {}
     for name, s in servers.items():
         if isinstance(s, StdioServerSpec):
-            cfg[name] = {
+            stdio_entry: dict[str, object] = {
                 "transport": "stdio",
                 "command": s.command,
                 "args": s.args,
-                "env": s.env or None,
-                "cwd": s.cwd or None,
                 "keep_alive": s.keep_alive,
             }
+            # Only include env if it has values (FastMCP doesn't accept None)
+            if s.env:
+                stdio_entry["env"] = s.env
+            # Only include cwd if set
+            if s.cwd is not None:
+                stdio_entry["cwd"] = s.cwd
+            cfg[name] = stdio_entry
         else:
-            entry: dict[str, object] = {
+            http_entry: dict[str, object] = {
                 "transport": s.transport,
                 "url": s.url,
             }
             if s.headers:
-                entry["headers"] = s.headers
+                http_entry["headers"] = s.headers
             if s.auth is not None:
-                entry["auth"] = s.auth
-            cfg[name] = entry
+                http_entry["auth"] = s.auth
+            cfg[name] = http_entry
     return cfg

@@ -444,8 +444,8 @@ class DynamicOrchestrator:
         - 100 points: Exact match in qualified name
         - 80 points: Match in server name
         - 60 points: Match in description
-        - 40 points: Keyword overlap with research
-        - 0 points: No match
+        - 40+ points: Keyword overlap with research
+        - 0 points: No match (FILTERED OUT)
 
         Args:
             capability: Requested capability (e.g., "context7").
@@ -453,7 +453,7 @@ class DynamicOrchestrator:
             research: Research results with keywords.
 
         Returns:
-            Servers sorted by relevance score (highest first).
+            Servers sorted by relevance score (highest first), with score=0 servers removed.
 
         Example:
             >>> ranked = orchestrator._rank_servers(
@@ -494,14 +494,20 @@ class DynamicOrchestrator:
         scored = [(s, calculate_score(s)) for s in servers]
         ranked = sorted(scored, key=lambda x: x[1], reverse=True)
 
+        # Filter out servers with score=0 (no relevance)
+        # This prevents attempting completely unrelated servers from fuzzy search
+        relevant = [(s, score) for s, score in ranked if score > 0]
+
         if self.verbose:
-            print(f"[RANKING] Ranked {len(ranked)} candidates:")
+            print(f"[RANKING] Ranked {len(ranked)} candidates ({len(relevant)} relevant):")
             for server, score in ranked[:5]:  # Show top 5
                 qn = server.get("qualifiedName", "unknown")
                 desc = server.get("description", "")[:40]
-                print(f"[RANKING]   {score:3d} pts: {qn} - {desc}...")
+                relevance = "✓" if score > 0 else "✗"
+                print(f"[RANKING]   {relevance} {score:3d} pts: {qn} - {desc}...")
 
-        return [s for s, _ in ranked]
+        # Return only relevant servers (score > 0)
+        return [s for s, _ in relevant]
 
     async def _handle_oauth_flow(self, oauth_exc: OAuthRequired, capability: str) -> bool:
         """Handle OAuth authentication flow automatically.
