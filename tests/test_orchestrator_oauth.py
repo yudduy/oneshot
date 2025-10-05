@@ -58,11 +58,11 @@ async def test_orchestrator_handles_oauth_automatically() -> None:
 
                     # Mock PKCEAuthenticator
                     mock_auth = Mock()
-                    mock_auth.generate_pkce_pair.return_value = ("verifier123", "challenge123")
+                    mock_auth.generate_pkce_pair.return_value = ("MOCK_VERIFIER_NOT_REAL", "MOCK_CHALLENGE_FAKE")
                     mock_auth.build_authorization_url.return_value = "https://auth.smithery.ai/authorize?..."
                     mock_auth.exchange_code_for_token = AsyncMock(return_value={
-                        "access_token": "test-access-token",
-                        "refresh_token": "test-refresh-token",
+                        "access_token": "FAKE_ACCESS_TOKEN_FOR_TESTING",
+                        "refresh_token": "FAKE_REFRESH_TOKEN_FOR_TESTING",
                         "token_type": "Bearer",
                         "expires_in": 3600,
                     })
@@ -90,14 +90,14 @@ async def test_orchestrator_handles_oauth_automatically() -> None:
                         # Verify tokens were exchanged
                         mock_auth.exchange_code_for_token.assert_called_once_with(
                             "test-auth-code-123",
-                            "verifier123",
+                            "MOCK_VERIFIER_NOT_REAL",
                             "http://localhost:8765/callback",
                         )
 
                         # Verify tokens were saved
                         saved_tokens = token_store.get_tokens("@test/server")
                         assert saved_tokens is not None
-                        assert saved_tokens["access_token"] == "test-access-token"
+                        assert saved_tokens["access_token"] == "FAKE_ACCESS_TOKEN_FOR_TESTING"
 
                         # Verify server was added to orchestrator
                         assert "test" in orchestrator.servers
@@ -322,18 +322,18 @@ async def test_orchestrator_multiple_oauth_servers_in_session() -> None:
                     MockBrowserHandler.return_value = mock_handler
 
                     mock_auth = Mock()
-                    mock_auth.generate_pkce_pair.return_value = ("verifier", "challenge")
+                    mock_auth.generate_pkce_pair.return_value = ("MOCK_VERIFIER_NOT_REAL", "MOCK_CHALLENGE_FAKE")
                     mock_auth.build_authorization_url.return_value = "https://auth..."
                     mock_auth.exchange_code_for_token = AsyncMock(side_effect=[
                         {
-                            "access_token": "github-token",
-                            "refresh_token": "github-refresh",
+                            "access_token": "FAKE_GITHUB_TOKEN_FOR_TESTING",
+                            "refresh_token": "FAKE_GITHUB_REFRESH_FOR_TESTING",
                             "token_type": "Bearer",
                             "expires_in": 3600,
                         },
                         {
-                            "access_token": "context7-token",
-                            "refresh_token": "context7-refresh",
+                            "access_token": "FAKE_CONTEXT7_TOKEN_FOR_TESTING",
+                            "refresh_token": "FAKE_CONTEXT7_REFRESH_FOR_TESTING",
                             "token_type": "Bearer",
                             "expires_in": 3600,
                         },
@@ -374,10 +374,10 @@ async def test_orchestrator_multiple_oauth_servers_in_session() -> None:
                         context7_tokens = token_store.get_tokens("@upstash/context7-mcp")
 
                         assert github_tokens is not None
-                        assert github_tokens["access_token"] == "github-token"
+                        assert github_tokens["access_token"] == "FAKE_GITHUB_TOKEN_FOR_TESTING"
 
                         assert context7_tokens is not None
-                        assert context7_tokens["access_token"] == "context7-token"
+                        assert context7_tokens["access_token"] == "FAKE_CONTEXT7_TOKEN_FOR_TESTING"
 
 
 @pytest.mark.asyncio
