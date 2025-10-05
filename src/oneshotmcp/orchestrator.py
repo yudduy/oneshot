@@ -7,7 +7,8 @@ from typing import Any
 
 from .agent import ModelLike, build_deep_agent
 from .config import ServerSpec
-from .registry import SmitheryAPIClient
+from .oauth import TokenStore
+from .registry import OAuthRequired, SmitheryAPIClient
 from .tools import MCPToolLoader
 
 
@@ -45,10 +46,12 @@ class DynamicOrchestrator:
         smithery_key: str,
         instructions: str | None = None,
         verbose: bool = False,
+        token_store: TokenStore | None = None,
     ) -> None:
         self.model = model
         self.servers: dict[str, ServerSpec] = dict(initial_servers)
-        self.smithery = SmitheryAPIClient(api_key=smithery_key)
+        self.token_store = token_store or TokenStore()
+        self.smithery = SmitheryAPIClient(api_key=smithery_key, token_store=self.token_store)
         self.instructions = instructions
         self.verbose = verbose
 
@@ -500,13 +503,156 @@ class DynamicOrchestrator:
 
         return [s for s, _ in ranked]
 
+    async def _handle_oauth_flow(self, oauth_exc: OAuthRequired, capability: str) -> bool:
+        """Handle OAuth authentication flow automatically.
+
+        Opens browser for user authorization, saves tokens, and retries server addition.
+
+        Args:
+            oauth_exc: OAuthRequired exception with OAuth config and auth URL.
+            capability: Capability name for server naming.
+
+        Returns:
+            True if OAuth succeeded and server was added, False otherwise.
+        """
+        from .oauth import BrowserAuthHandler, PKCEAuthenticator
+
+        try:
+            # Inform user about OAuth requirement
+            print(f"\n🔐 Server '{oauth_exc.server_name}' requires OAuth 2.1 authentication")
+            print(f"This will open your browser to authorize OneShotMCP.")
+
+            # Prompt user for consent
+            user_input = input("\nOpen browser for authorization? (yes/no): ").strip().lower()
+
+            # Check if user accepts (accept variations: yes, y, YES, Y)
+            if user_input not in ("yes", "y"):
+                if self.verbose:
+                    print(f"[OAUTH] Authorization declined by user")
+                return False
+
+            if self.verbose:
+                print(f"\n[OAUTH] Opening browser for authorization...")
+
+            # Initialize authenticator
+            client_id = "oneshotmcp-cli"
+            redirect_uri = "http://localhost:8765/callback"
+
+            auth = PKCEAuthenticator(
+                authorization_endpoint=oauth_exc.oauth_config.authorization_endpoint,
+                token_endpoint=oauth_exc.oauth_config.token_endpoint,
+                client_id=client_id,
+                scopes=oauth_exc.oauth_config.scopes,
+            )
+
+            # Generate PKCE pair
+            verifier, challenge = auth.generate_pkce_pair()
+
+            # Build authorization URL
+            auth_url = auth.build_authorization_url(redirect_uri, challenge)
+
+            # Start browser-based authorization
+            handler = BrowserAuthHandler(redirect_uri, timeout=180.0)  # 3 min timeout
+            code = await handler.authorize(auth_url)
+
+            if self.verbose:
+                print(f"[OAUTH] Authorization successful! Exchanging code for tokens...")
+
+            # Exchange code for tokens
+            tokens = await auth.exchange_code_for_token(code, verifier, redirect_uri)
+
+            # Save tokens
+            self.token_store.save_tokens(oauth_exc.server_name, tokens)
+
+            if self.verbose:
+                print(f"[OAUTH] ✓ Tokens saved for '{oauth_exc.server_name}'")
+
+            # Retry getting the server (should work now with stored tokens)
+            spec = await self.smithery.get_server(oauth_exc.server_name)
+            self.servers[capability] = spec
+
+            if self.verbose:
+                print(f"[OAUTH] ✓ Successfully added '{oauth_exc.server_name}' as '{capability}' server")
+
+            return True
+
+        except Exception as exc:
+            if self.verbose:
+                print(f"[OAUTH] ✗ OAuth flow failed: {exc}")
+            return False
+
+    async def _try_local_installation(
+        self, qualified_name: str, capability: str
+    ) -> bool:
+        """Attempt local installation of MCP server when hosted version fails.
+
+        This is the automatic fallback when OAuth is required but fails/declined.
+        It will:
+        1. Fetch full Smithery metadata for the server
+        2. Check if it's npm-installable
+        3. Install locally using npx
+        4. Add as stdio server
+
+        Args:
+            qualified_name: Smithery qualified name (e.g., "@upstash/context7-mcp")
+            capability: Capability name for server naming
+
+        Returns:
+            True if local installation succeeded, False otherwise
+        """
+        from .local_installer import LocalMCPInstaller
+
+        try:
+            # Fetch full Smithery metadata (need it for config requirements)
+            if self.verbose:
+                print(f"[LOCAL] Fetching metadata for local installation...")
+
+            # Get metadata from Smithery API directly
+            import httpx
+
+            encoded_name = qualified_name.replace("/", "%2F").replace("@", "%40")
+            url = f"{self.smithery._base_url}/servers/{encoded_name}"
+            headers = {"Authorization": f"Bearer {self.smithery._api_key}"}
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                metadata = response.json()
+
+            # Attempt local installation
+            installer = LocalMCPInstaller()
+
+            spec = await installer.attempt_local_installation(
+                smithery_metadata=metadata,
+                user_config={},  # TODO: Allow user to provide config
+            )
+
+            if spec is None:
+                if self.verbose:
+                    print(f"[LOCAL] ✗ Local installation not possible for '{qualified_name}'")
+                return False
+
+            # Add as stdio server
+            self.servers[capability] = spec
+
+            if self.verbose:
+                print(f"[LOCAL] ✓ Successfully installed '{qualified_name}' locally")
+                print(f"[LOCAL]   Command: {spec.command} {' '.join(spec.args)}")
+
+            return True
+
+        except Exception as exc:
+            if self.verbose:
+                print(f"[LOCAL] ✗ Local installation failed: {exc}")
+            return False
+
     async def _try_candidates(
         self, ranked_servers: list[dict[str, Any]], capability: str
     ) -> bool:
         """Try adding servers from ranked list, handling failures gracefully.
 
         Attempts to add servers in ranked order (best match first),
-        skipping OAuth and configuration errors until success.
+        automatically handling OAuth flows when needed.
 
         Args:
             ranked_servers: Servers sorted by relevance (from _rank_servers).
@@ -558,8 +704,34 @@ class DynamicOrchestrator:
 
                 return True
 
+            except OAuthRequired as oauth_exc:
+                # Handle OAuth automatically
+                if self.verbose:
+                    print(f"[ATTEMPT] OAuth required for '{qualified_name}'")
+
+                # Try OAuth flow
+                oauth_success = await self._handle_oauth_flow(oauth_exc, capability)
+                if oauth_success:
+                    return True
+
+                # OAuth failed - try local installation as fallback
+                if self.verbose:
+                    print(f"[ATTEMPT] OAuth failed, attempting local installation...")
+
+                local_success = await self._try_local_installation(
+                    qualified_name=qualified_name,
+                    capability=capability,
+                )
+                if local_success:
+                    return True
+
+                # Both OAuth and local installation failed, try next candidate
+                if self.verbose:
+                    print(f"[ATTEMPT]   Trying next candidate...")
+                continue
+
             except Exception as exc:
-                # Check if it's a RegistryError (OAuth/config requirement)
+                # Check if it's a RegistryError (config requirement, etc.)
                 from .registry import RegistryError
 
                 if isinstance(exc, RegistryError):

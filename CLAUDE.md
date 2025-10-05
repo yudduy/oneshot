@@ -114,42 +114,58 @@ orchestrator.servers   # Active MCP servers (mutable)
 orchestrator.graph     # Agent graph (rebuilt when servers change)
 ```
 
-### Known Limitations
+### OAuth 2.1 Authentication (Fully Supported)
 
-#### Smithery-Hosted Servers Require OAuth
+**✨ Seamless Browser-Based Authentication**: OneShotMCP now fully supports OAuth 2.1 with PKCE for Smithery-hosted servers. Authentication happens automatically when needed - no manual commands required!
 
-**Problem:** Servers hosted on `server.smithery.ai` require OAuth 2.1 authentication with PKCE flow, which is not currently supported by the Python MCP SDK.
-
-**Impact:**
-- Many servers in the Smithery registry cannot be used via dynamic discovery
-- Agent will receive a `RegistryError` explaining the OAuth requirement
-- Discovery continues - agent may find alternative self-hosted servers
-
-**Example Error:**
+**How It Works:**
 ```
-⚠️  Cannot add '@ref-tools/ref-tools-mcp' for research:
-   Server '@ref-tools/ref-tools-mcp' is hosted on Smithery and requires
-   OAuth 2.1 authentication (not currently supported in Python MCP SDK).
-💡 Tip: You can manually configure this server if you have credentials,
-   or try a different query to find alternative servers.
+User: "fetch context7 mcp and use it"
+  ↓
+OneShotMCP: Detects @upstash/context7-mcp needs OAuth
+  ↓
+OneShotMCP: Opens browser for authorization
+  ↓
+[User clicks "Allow" in browser]
+  ↓
+OneShotMCP: ✓ Tokens saved, continues with original request
+  ↓
+OneShotMCP: Uses context7 to answer the query
 ```
 
-**Workarounds:**
-1. **Use pre-configured servers**: Set `TAVILY_API_KEY` for web search (doesn't require OAuth)
-2. **Self-host servers**: Deploy MCP servers yourself with simple token auth
-3. **Manual configuration**: If you have OAuth tokens, manually configure via `--http` flag
-4. **Wait for SDK support**: Track [smithery-ai/cli#336](https://github.com/smithery-ai/cli/issues/336)
+**Features:**
+- ✅ **RFC 7636 PKCE** with S256 challenge method
+- ✅ **RFC 9728 Discovery** for automatic OAuth endpoint detection
+- ✅ **Encrypted token storage** (Fernet, AES-128-CBC + HMAC)
+- ✅ **Automatic token refresh** when access tokens expire
+- ✅ **Token rotation** (OAuth 2.1 compliant)
+- ✅ **Zero manual configuration** - just authenticate when prompted
 
-**What Works:**
-- ✅ Self-hosted MCP servers (via HTTP/SSE)
+**Example Usage:**
+```bash
+export SMITHERY_API_KEY="sk_..."
+export OPENAI_API_KEY="sk-..."
+oneshot
+
+> fetch context7 mcp and search for vercel documentation
+# → Browser opens for OAuth authorization
+# → User authorizes once
+# → Agent uses context7 tools immediately
+# → Tokens persist for future sessions
+```
+
+**Supported:**
+- ✅ Smithery-hosted servers (`server.smithery.ai/*`)
+- ✅ OAuth 2.1 protected servers
+- ✅ Self-hosted MCP servers (HTTP/SSE)
 - ✅ Servers with simple auth (API key in URL/header)
 - ✅ Public servers without auth
-- ✅ Tavily, Brave Search (pre-configured with env vars)
 
-**What Doesn't Work:**
-- ❌ Smithery-hosted servers (`server.smithery.ai/*`)
-- ❌ OAuth 2.1 protected servers
-- ❌ Servers requiring browser-based login
+**Token Management:**
+- Tokens stored in `~/.config/oneshotmcp/tokens.json` (encrypted)
+- Automatic refresh when expired
+- Persists across sessions
+- File permissions: 0o600 (owner-only)
 
 #### Server Configuration Requirements
 
@@ -317,24 +333,34 @@ oneshot
 ## File Structure
 
 ```
-src/deepmcpagent/
+src/oneshotmcp/
 ├── __init__.py          # Public API exports
-├── __main__.py          # Entry point for python -m deepmcpagent
+├── __main__.py          # Entry point for python -m oneshotmcp
 ├── config.py            # Server specs and config conversion
 ├── clients.py           # FastMCP multi-server client wrapper
 ├── tools.py             # MCP tool discovery and LangChain conversion
 ├── agent.py             # build_deep_agent() - main builder function
-├── cli.py               # Typer CLI (list-tools, run commands)
-└── prompt.py            # DEFAULT_SYSTEM_PROMPT
+├── cli.py               # Typer CLI (main oneshot command)
+├── prompt.py            # DEFAULT_SYSTEM_PROMPT
+├── oauth.py             # OAuth 2.1 PKCE authentication
+├── registry.py          # Smithery API client for MCP discovery
+└── orchestrator.py      # Dynamic tool discovery orchestrator
 
 tests/
 ├── test_config.py       # Server spec and config tests
 ├── test_tools_schema.py # JSON-Schema → Pydantic conversion tests
 ├── test_cli_parse.py    # CLI argument parsing tests
-└── test_agent.py        # Integration tests (may be skipped)
+├── test_agent.py        # Integration tests (may be skipped)
+├── test_oauth.py        # OAuth PKCE unit tests (15 tests)
+├── test_oauth_integration.py # OAuth integration tests (7 tests)
+├── test_registry.py     # Smithery API client tests
+├── test_orchestrator.py # Dynamic discovery tests
+└── fixtures/
+    └── mock_oauth.py    # Mock OAuth server (RFC 9728 compliant)
 
 examples/
 ├── use_agent.py         # Demo with fancy Rich console output
+├── dynamic_agent.py     # Dynamic discovery examples
 └── servers/
     └── math_server.py   # Sample MCP HTTP server
 

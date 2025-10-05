@@ -8,10 +8,33 @@ from typing import Any
 import httpx
 
 from .config import HTTPServerSpec
+from .oauth import OAuthConfig, TokenStore, discover_oauth_metadata
 
 
 class RegistryError(RuntimeError):
     """Raised when registry operations fail."""
+
+
+class OAuthRequired(RegistryError):
+    """Raised when OAuth authentication is required but not available.
+
+    Attributes:
+        server_name: MCP server qualified name.
+        oauth_config: OAuth configuration for authentication.
+        auth_url: Pre-built authorization URL for convenience.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        server_name: str,
+        oauth_config: OAuthConfig,
+        auth_url: str,
+    ) -> None:
+        super().__init__(message)
+        self.server_name = server_name
+        self.oauth_config = oauth_config
+        self.auth_url = auth_url
 
 
 class SmitheryAPIClient:
@@ -37,11 +60,13 @@ class SmitheryAPIClient:
         base_url: str = "https://registry.smithery.ai",
         timeout: float = 30.0,
         max_retries: int = 3,
+        token_store: TokenStore | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries
+        self._token_store = token_store or TokenStore()
 
         # Simple in-memory caching
         self._search_cache: dict[str, list[dict[str, Any]]] = {}
@@ -211,20 +236,50 @@ class SmitheryAPIClient:
 
             # Check if this is a Smithery-hosted server (requires OAuth)
             if "server.smithery.ai" in server_url:
-                config_schema = connection.get("configSchema", {})
-                required = config_schema.get("required", [])
+                # Check if we have stored tokens for this server
+                stored_tokens = self._token_store.get_tokens(qualified_name)
 
-                msg = (
-                    f"Server '{qualified_name}' is hosted on Smithery and requires "
-                    f"OAuth 2.1 authentication (not currently supported in Python MCP SDK). "
-                )
-                if required:
-                    msg += f"Additionally requires config: {', '.join(required)}. "
-                msg += (
-                    f"Consider using a self-hosted alternative or manually configuring "
-                    f"this server with proper credentials."
-                )
-                raise RegistryError(msg)
+                if stored_tokens:
+                    # We have tokens! Attach them to the server spec
+                    access_token = stored_tokens.get("access_token")
+                    if access_token:
+                        headers = {"Authorization": f"Bearer {access_token}"}
+                    else:
+                        headers = {}
+                else:
+                    # No tokens - need OAuth authentication
+                    # Discover OAuth configuration
+                    try:
+                        oauth_config = await discover_oauth_metadata(server_url)
+                    except Exception as exc:
+                        raise RegistryError(
+                            f"Server '{qualified_name}' requires OAuth authentication, "
+                            f"but OAuth discovery failed: {exc}"
+                        ) from exc
+
+                    # Build authorization URL for user
+                    from .oauth import PKCEAuthenticator
+
+                    # For Smithery, use a default client ID (adjust if needed)
+                    client_id = "oneshotmcp-cli"
+                    redirect_uri = "http://localhost:8765/callback"
+
+                    auth = PKCEAuthenticator(
+                        authorization_endpoint=oauth_config.authorization_endpoint,
+                        token_endpoint=oauth_config.token_endpoint,
+                        client_id=client_id,
+                        scopes=oauth_config.scopes,
+                    )
+
+                    _, challenge = auth.generate_pkce_pair()
+                    auth_url = auth.build_authorization_url(redirect_uri, challenge)
+
+                    # Raise OAuthRequired (orchestrator will handle automatically)
+                    msg = f"Server '{qualified_name}' requires OAuth 2.1 authentication"
+                    raise OAuthRequired(msg, qualified_name, oauth_config, auth_url)
+            else:
+                # Self-hosted server - no OAuth needed
+                headers = {}
 
             # Validate transport type
             if transport not in ("http", "streamable-http", "sse"):
@@ -236,7 +291,7 @@ class SmitheryAPIClient:
             spec = HTTPServerSpec(
                 url=server_url,
                 transport=transport,  # validated above
-                headers={},  # Headers would come from config if needed
+                headers=headers,  # OAuth Bearer token if applicable
                 auth=None,  # Auth would come from config if needed
             )
 
@@ -245,6 +300,9 @@ class SmitheryAPIClient:
 
             return spec
 
+        except OAuthRequired:
+            # Re-raise OAuthRequired without wrapping
+            raise
         except httpx.HTTPStatusError as exc:
             raise RegistryError(
                 f"Failed to get server '{qualified_name}': "
