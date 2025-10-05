@@ -181,6 +181,65 @@ class LocalMCPInstaller:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
+    async def verify_package_executable(self, package_name: str) -> tuple[bool, str]:
+        """Verify npm package has executable entry.
+
+        Checks if package has a 'bin' field in package.json, which indicates
+        it can be run as an executable via npx.
+
+        Args:
+            package_name: npm package name to verify
+
+        Returns:
+            Tuple of (has_executable: bool, error_message: str)
+            If has_executable is True, error_message is empty.
+            If False, error_message explains why.
+
+        Example:
+            >>> has_exec, error = await installer.verify_package_executable("@foo/bar")
+            >>> if not has_exec:
+            ...     print(f"Cannot run: {error}")
+        """
+        try:
+            # Check if package has bin field
+            result = subprocess.run(
+                ["npm", "view", package_name, "bin", "--json"],
+                capture_output=True,
+                timeout=10,
+                text=True,
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                # Has bin field - package is executable
+                return (True, "")
+
+            # No bin field - check if it has a main entry that might work
+            result_main = subprocess.run(
+                ["npm", "view", package_name, "main"],
+                capture_output=True,
+                timeout=10,
+                text=True,
+            )
+
+            if result_main.returncode == 0 and result_main.stdout.strip():
+                # Has main but no bin - might work with npx but not guaranteed
+                main_file = result_main.stdout.strip()
+                return (
+                    False,
+                    f"Package has 'main' ({main_file}) but no 'bin' entry. "
+                    "It may not be runnable as a CLI tool via npx.",
+                )
+
+            # No bin and no main
+            return (
+                False,
+                "Package has neither 'bin' nor 'main' entry in package.json. "
+                "It cannot be run as an executable.",
+            )
+
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            return (False, f"Failed to verify executable: {exc}")
+
     async def attempt_local_installation(
         self,
         smithery_metadata: dict[str, Any],
@@ -210,6 +269,14 @@ class LocalMCPInstaller:
 
         # Verify package exists
         if not await self.verify_package_exists(package_name):
+            return None
+
+        # Verify package has executable entry (bin field)
+        has_executable, error_msg = await self.verify_package_executable(package_name)
+        if not has_executable:
+            print(f"\n❌ Cannot install {package_name}:")
+            print(f"   {error_msg}")
+            print(f"   This package is not runnable as an MCP server via npx.")
             return None
 
         # Extract config requirements
