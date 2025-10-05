@@ -174,6 +174,50 @@ class DynamicOrchestrator:
 
         return None
 
+    def _extract_response_text(self, result: dict[str, Any]) -> str:
+        """Extract text response from agent invocation result.
+
+        Args:
+            result: Result from graph.ainvoke()
+
+        Returns:
+            Extracted text content or empty string.
+        """
+        messages = result.get("messages", [])
+        if not messages:
+            return ""
+
+        final_message = messages[-1]
+        content = getattr(final_message, "content", None)
+
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list) and content:
+            if isinstance(content[0], dict):
+                return content[0].get("text", "")
+
+        return str(final_message) if final_message else ""
+
+    def _deduplicate_servers(self, servers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Remove duplicate servers based on qualifiedName.
+
+        Args:
+            servers: List of server info dicts from Smithery API.
+
+        Returns:
+            Deduplicated list preserving order.
+        """
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+
+        for server in servers:
+            qualified_name = server.get("qualifiedName") or server.get("qualified_name")
+            if qualified_name and qualified_name not in seen:
+                seen.add(qualified_name)
+                unique.append(server)
+
+        return unique
+
     def _extract_explicit_mcp_request(self, user_message: str) -> str | None:
         """Extract explicit MCP server request from user message.
 
@@ -214,75 +258,425 @@ class DynamicOrchestrator:
 
         return None
 
-    async def _discover_and_add_server(self, capability: str) -> bool:
-        """Discover and add MCP server for the given capability.
+    async def _research_capability(self, capability: str) -> dict[str, Any]:
+        """Use web search to understand what the capability/tool is.
 
-        Searches the Smithery registry for a server matching the capability,
-        retrieves its specification, and adds it to the active servers.
+        This phase uses Tavily (if available) to research the capability
+        before searching Smithery, enabling semantic query generation.
 
         Args:
-            capability: Capability name to search for (e.g., "github", "weather").
+            capability: Capability name to research (e.g., "context7").
+
+        Returns:
+            Dict with "description" and "keywords" if research succeeded,
+            empty dict otherwise.
+
+        Example:
+            >>> research = await orchestrator._research_capability("context7")
+            >>> research["description"]
+            'Context7 is a documentation search tool for libraries and frameworks'
+        """
+        # Skip research if Tavily not available
+        if "tavily" not in self.servers:
+            if self.verbose:
+                print(f"[RESEARCH] Skipping research (Tavily not configured)")
+            return {}
+
+        try:
+            if self.verbose:
+                print(f"[RESEARCH] Researching '{capability}' using web search...")
+
+            # Build temporary mini-agent with just Tavily
+            from .agent import build_deep_agent
+
+            research_graph, _ = await build_deep_agent(
+                servers={"tavily": self.servers["tavily"]},
+                model=self.model,
+                instructions=f"You are a research assistant. Provide concise, factual answers about developer tools and MCP servers.",
+                trace_tools=False,  # Silent research
+            )
+
+            # Ask research question
+            result = await research_graph.ainvoke({
+                "messages": [{
+                    "role": "user",
+                    "content": f"What is {capability} in the context of MCP servers, developer tools, or software? Answer in 1-2 sentences."
+                }]
+            })
+
+            # Extract response
+            description = self._extract_response_text(result)
+
+            if description:
+                # Extract keywords from description (simple approach)
+                # Future: use LLM to extract structured info
+                keywords = [
+                    word.lower().strip(".,!?")
+                    for word in description.split()
+                    if len(word) > 4  # Skip short words
+                ][:5]  # Top 5 keywords
+
+                if self.verbose:
+                    print(f"[RESEARCH] Found: {description[:80]}...")
+                    print(f"[RESEARCH] Keywords: {keywords}")
+
+                return {"description": description, "keywords": keywords}
+
+        except Exception as exc:
+            if self.verbose:
+                print(f"[RESEARCH] Research failed: {exc}")
+
+        return {}
+
+    def _generate_search_queries(
+        self, capability: str, research: dict[str, Any]
+    ) -> list[str]:
+        """Generate multiple search query variations for Smithery.
+
+        Creates variations to improve discovery success rate:
+        - Exact capability name
+        - With "mcp" suffix
+        - With "server" suffix
+        - Semantic description from research (if available)
+
+        Args:
+            capability: Capability name (e.g., "context7").
+            research: Research results from _research_capability().
+
+        Returns:
+            List of search query strings to try.
+
+        Example:
+            >>> queries = orchestrator._generate_search_queries(
+            ...     "context7",
+            ...     {"description": "documentation search tool"}
+            ... )
+            >>> queries
+            ['context7', 'context7 mcp', 'context7 server', 'documentation search tool']
+        """
+        queries = [
+            capability,  # Original
+            f"{capability} mcp",  # With MCP suffix
+            f"{capability} server",  # With server suffix
+        ]
+
+        # Add semantic query from research description
+        if research and research.get("description"):
+            # Use first sentence of description as query
+            desc = research["description"]
+            first_sentence = desc.split(".")[0].strip()
+            if first_sentence and first_sentence not in queries:
+                queries.append(first_sentence)
+
+        # Add keyword-based query
+        if research and research.get("keywords"):
+            keyword_query = " ".join(research["keywords"][:3])
+            if keyword_query not in queries:
+                queries.append(keyword_query)
+
+        if self.verbose:
+            print(f"[SEARCH] Generated {len(queries)} search queries: {queries}")
+
+        return queries
+
+    async def _search_with_refinement(
+        self, queries: list[str]
+    ) -> list[dict[str, Any]]:
+        """Execute multiple search queries and combine results.
+
+        Tries all query variations, collects results, and deduplicates.
+
+        Args:
+            queries: List of search query strings from _generate_search_queries().
+
+        Returns:
+            Deduplicated list of server info dicts.
+
+        Example:
+            >>> candidates = await orchestrator._search_with_refinement([
+            ...     "context7",
+            ...     "context7 mcp",
+            ...     "documentation search"
+            ... ])
+        """
+        all_results: list[dict[str, Any]] = []
+
+        for query in queries:
+            try:
+                if self.verbose:
+                    print(f"[SEARCH] Trying query: '{query}'...")
+
+                results = await self.smithery.search(query=query, limit=5)
+
+                if results:
+                    if self.verbose:
+                        print(f"[SEARCH] Found {len(results)} result(s) for '{query}'")
+                    all_results.extend(results)
+                else:
+                    if self.verbose:
+                        print(f"[SEARCH] No results for '{query}'")
+
+            except Exception as exc:
+                if self.verbose:
+                    print(f"[SEARCH] Error searching '{query}': {exc}")
+                continue
+
+        # Deduplicate combined results
+        unique = self._deduplicate_servers(all_results)
+
+        if self.verbose:
+            print(f"[SEARCH] Total unique candidates: {len(unique)}")
+
+        return unique
+
+    def _rank_servers(
+        self,
+        capability: str,
+        servers: list[dict[str, Any]],
+        research: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Rank servers by relevance to the requested capability.
+
+        Scoring criteria (higher is better):
+        - 100 points: Exact match in qualified name
+        - 80 points: Match in server name
+        - 60 points: Match in description
+        - 40 points: Keyword overlap with research
+        - 0 points: No match
+
+        Args:
+            capability: Requested capability (e.g., "context7").
+            servers: List of server candidates from search.
+            research: Research results with keywords.
+
+        Returns:
+            Servers sorted by relevance score (highest first).
+
+        Example:
+            >>> ranked = orchestrator._rank_servers(
+            ...     "context7",
+            ...     [{"qualifiedName": "@context7/mcp", ...}, ...],
+            ...     {"keywords": ["documentation", "search"]}
+            ... )
+        """
+
+        def calculate_score(server: dict[str, Any]) -> int:
+            qualified_name = (server.get("qualifiedName") or "").lower()
+            name = (server.get("name") or "").lower()
+            description = (server.get("description") or "").lower()
+            capability_lower = capability.lower()
+
+            # Exact match in qualified name (highest priority)
+            if capability_lower in qualified_name:
+                return 100
+
+            # Match in server name
+            if capability_lower in name:
+                return 80
+
+            # Match in description
+            if capability_lower in description:
+                return 60
+
+            # Keyword overlap from research
+            if research and research.get("keywords"):
+                keywords = research["keywords"]
+                matches = sum(1 for kw in keywords if kw.lower() in description)
+                if matches > 0:
+                    return 40 + (matches * 5)  # Bonus for multiple keyword matches
+
+            return 0
+
+        # Score and sort
+        scored = [(s, calculate_score(s)) for s in servers]
+        ranked = sorted(scored, key=lambda x: x[1], reverse=True)
+
+        if self.verbose:
+            print(f"[RANKING] Ranked {len(ranked)} candidates:")
+            for server, score in ranked[:5]:  # Show top 5
+                qn = server.get("qualifiedName", "unknown")
+                desc = server.get("description", "")[:40]
+                print(f"[RANKING]   {score:3d} pts: {qn} - {desc}...")
+
+        return [s for s, _ in ranked]
+
+    async def _try_candidates(
+        self, ranked_servers: list[dict[str, Any]], capability: str
+    ) -> bool:
+        """Try adding servers from ranked list, handling failures gracefully.
+
+        Attempts to add servers in ranked order (best match first),
+        skipping OAuth and configuration errors until success.
+
+        Args:
+            ranked_servers: Servers sorted by relevance (from _rank_servers).
+            capability: Capability name for server naming.
+
+        Returns:
+            True if a server was successfully added, False otherwise.
+
+        Example:
+            >>> success = await orchestrator._try_candidates(
+            ...     [{"qualifiedName": "@context7/mcp"}, ...],
+            ...     "context7"
+            ... )
+        """
+        if not ranked_servers:
+            if self.verbose:
+                print(f"[ATTEMPT] No candidates to try")
+            return False
+
+        # Try top 5 candidates (or all if fewer)
+        max_attempts = min(5, len(ranked_servers))
+
+        for i, server_info in enumerate(ranked_servers[:max_attempts], 1):
+            qualified_name = server_info.get("qualifiedName") or server_info.get(
+                "qualified_name"
+            )
+
+            if not qualified_name:
+                continue
+
+            try:
+                if self.verbose:
+                    desc = server_info.get("description", "N/A")[:50]
+                    print(
+                        f"[ATTEMPT] Attempt {i}/{max_attempts}: Trying '{qualified_name}'"
+                    )
+                    print(f"[ATTEMPT]   Description: {desc}...")
+
+                # Get full server spec
+                spec = await self.smithery.get_server(qualified_name)
+
+                # Add to active servers
+                self.servers[capability] = spec
+
+                if self.verbose:
+                    print(
+                        f"[ATTEMPT] ✓ Successfully added '{qualified_name}' as '{capability}' server"
+                    )
+
+                return True
+
+            except Exception as exc:
+                # Check if it's a RegistryError (OAuth/config requirement)
+                from .registry import RegistryError
+
+                if isinstance(exc, RegistryError):
+                    if self.verbose:
+                        print(f"[ATTEMPT] ✗ Cannot use '{qualified_name}': {exc}")
+                        print(f"[ATTEMPT]   Trying next candidate...")
+                else:
+                    if self.verbose:
+                        print(f"[ATTEMPT] ✗ Error with '{qualified_name}': {exc}")
+                        print(f"[ATTEMPT]   Trying next candidate...")
+
+                continue
+
+        if self.verbose:
+            print(f"[ATTEMPT] All {max_attempts} attempts failed")
+
+        return False
+
+    def _suggest_alternatives(
+        self, capability: str, ranked_servers: list[dict[str, Any]]
+    ) -> None:
+        """Suggest alternatives to the user when all attempts fail.
+
+        Displays helpful information about what was found and why it failed,
+        along with suggestions for next steps.
+
+        Args:
+            capability: The requested capability.
+            ranked_servers: Servers that were attempted (ranked by relevance).
+
+        Example:
+            >>> orchestrator._suggest_alternatives("context7", [
+            ...     {"qualifiedName": "@mem0ai/mem0", "description": "Memory tool"},
+            ... ])
+        """
+        if not ranked_servers:
+            print(f"\n⚠️  Discovery failed: No MCP servers found for '{capability}'")
+            print("\n💡 Suggestions:")
+            print(f"   • Try being more specific (e.g., 'fetch {capability}-docs mcp')")
+            print(f"   • Describe what it does (e.g., 'get documentation search tool')")
+            print(f"   • Check spelling or try alternative names")
+            return
+
+        print(
+            f"\n⚠️  Discovery failed: Found {len(ranked_servers)} potential matches, but all require OAuth or manual config"
+        )
+        print(f"\n🔍 Top candidates found:")
+
+        for i, server in enumerate(ranked_servers[:3], 1):
+            qn = server.get("qualifiedName", "unknown")
+            desc = server.get("description", "No description available")[:80]
+            print(f"\n   {i}. {qn}")
+            print(f"      {desc}...")
+
+        print(f"\n💡 Next steps:")
+        print(f"   • Try self-hosting one of these servers")
+        print(
+            f"   • Use --http flag to manually configure with your credentials:"
+        )
+        print(
+            f'     oneshot --http "name={capability} url=http://localhost:8000/mcp"'
+        )
+        print(
+            f"   • Search for alternative servers: https://smithery.ai/search?q={capability}"
+        )
+
+    async def _discover_and_add_server(self, capability: str) -> bool:
+        """Intelligent multi-phase MCP server discovery.
+
+        This method orchestrates a 5-phase discovery process:
+        1. Research: Use web search to understand the capability
+        2. Multi-Query Search: Try multiple search variations
+        3. Ranking: Score candidates by relevance
+        4. Multi-Attempt: Try top candidates, skip OAuth errors
+        5. Fallback: Suggest alternatives if all fail
+
+        Args:
+            capability: Capability name to search for (e.g., "github", "context7").
 
         Returns:
             True if server was found and added, False otherwise.
 
         Example:
-            >>> success = await orchestrator._discover_and_add_server("github")
+            >>> success = await orchestrator._discover_and_add_server("context7")
             >>> if success:
-            ...     print("GitHub server added!")
+            ...     print("Context7 server added!")
         """
-        try:
+        if self.verbose:
+            print(f"\n[DISCOVERY] Starting intelligent discovery for '{capability}'...")
+
+        # Phase 1: Research the capability (if Tavily available)
+        research = await self._research_capability(capability)
+
+        # Phase 2: Generate search queries and execute multi-query search
+        queries = self._generate_search_queries(capability, research)
+        candidates = await self._search_with_refinement(queries)
+
+        if not candidates:
             if self.verbose:
-                print(f"[DISCOVERY] Searching Smithery for '{capability}' servers...")
+                print(f"[DISCOVERY] No candidates found across all queries")
+            self._suggest_alternatives(capability, [])
+            return False
 
-            # Search Smithery for matching servers
-            results = await self.smithery.search(query=capability, limit=1)
+        # Phase 3: Rank candidates by relevance
+        ranked = self._rank_servers(capability, candidates, research)
 
-            if not results:
-                if self.verbose:
-                    print(f"[DISCOVERY] No servers found for '{capability}'")
-                return False
+        # Phase 4: Try adding candidates in ranked order
+        success = await self._try_candidates(ranked, capability)
 
-            # Get the first result
-            server_info = results[0]
-            # API returns camelCase, try both formats
-            qualified_name = server_info.get("qualifiedName") or server_info.get("qualified_name")
-
-            if not qualified_name:
-                return False
-
+        if success:
             if self.verbose:
-                print(f"[DISCOVERY] Found server: {qualified_name}")
-                print(f"[DISCOVERY] Fetching server specification...")
-
-            # Get full server spec
-            spec = await self.smithery.get_server(qualified_name)
-
-            # Add to active servers (use capability as name)
-            self.servers[capability] = spec
-
-            if self.verbose:
-                print(f"[DISCOVERY] ✓ Added '{qualified_name}' as '{capability}' server")
-
+                print(f"[DISCOVERY] ✓ Successfully discovered and added '{capability}'")
             return True
 
-        except Exception as exc:
-            # Check if it's a RegistryError (e.g., Smithery OAuth server)
-            from .registry import RegistryError
-
-            if isinstance(exc, RegistryError):
-                # User-friendly error message for incompatible servers
-                print(f"⚠️  Cannot add '{qualified_name}' for {capability}:")
-                print(f"   {exc}")
-                print(
-                    f"💡 Tip: You can manually configure this server if you have credentials,"
-                )
-                print(f"   or try a different query to find alternative servers.")
-            else:
-                if self.verbose:
-                    print(f"[DISCOVERY] Error during discovery: {exc}")
-            # Otherwise silently fail for other discovery errors
-            return False
+        # Phase 5: All attempts failed - suggest alternatives
+        self._suggest_alternatives(capability, ranked)
+        return False
 
     async def chat(self, user_message: str) -> str:
         """Main conversation loop with dynamic tool discovery.
