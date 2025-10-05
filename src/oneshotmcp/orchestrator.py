@@ -261,6 +261,117 @@ class DynamicOrchestrator:
 
         return None
 
+    async def _extract_keywords_with_llm(
+        self, capability: str, description: str
+    ) -> list[str]:
+        """Extract domain-specific keywords using LLM, filtering generic terms.
+
+        Uses the LLM to intelligently extract keywords that are specific to the
+        capability, avoiding generic tech terms that match unrelated servers.
+
+        Args:
+            capability: The capability name (e.g., "vercel")
+            description: Research description to extract keywords from
+
+        Returns:
+            List of specific, relevant keywords (max 5)
+
+        Example:
+            >>> keywords = await orch._extract_keywords_with_llm(
+            ...     "vercel",
+            ...     "Vercel is a cloud platform for deploying web apps"
+            ... )
+            >>> keywords
+            ['vercel', 'deployment', 'hosting', 'edge', 'serverless']
+        """
+        # Generic terms to filter out (too common in tech)
+        GENERIC_TERMS = {
+            "cloud",
+            "platform",
+            "server",
+            "service",
+            "tool",
+            "api",
+            "application",
+            "system",
+            "software",
+            "technology",
+            "solution",
+            "framework",
+            "library",
+            "package",
+            "module",
+            "integration",
+            "interface",
+            "protocol",
+            "primarily",
+            "focused",
+            "provides",
+            "enables",
+            "allows",
+            "helps",
+        }
+
+        try:
+            # Use LLM to extract specific keywords
+            from langchain_core.messages import HumanMessage
+
+            prompt = f"""Extract 3-5 SPECIFIC keywords for '{capability}' from this description:
+
+"{description}"
+
+Requirements:
+1. Include the capability name itself ('{capability}')
+2. Extract company/service names (e.g., 'vercel', 'github', 'stripe')
+3. Extract specific technologies (e.g., 'postgresql', 'redis', 'graphql')
+4. Extract domain-specific terms (e.g., 'deployment', 'authentication', 'billing')
+5. EXCLUDE generic terms: {', '.join(list(GENERIC_TERMS)[:10])}...
+
+Return ONLY the keywords as a comma-separated list, nothing else.
+Example: vercel, deployment, edge, serverless"""
+
+            # Use the same model instance
+            response = await self.model.ainvoke([HumanMessage(content=prompt)])
+
+            # Extract keywords from response
+            keywords_text = response.content.strip().lower()
+
+            # Parse comma-separated list
+            extracted_keywords = [
+                kw.strip().strip(".,!?\"'")
+                for kw in keywords_text.split(",")
+                if kw.strip()
+            ]
+
+            # Filter out generic terms and limit to 5
+            specific_keywords = [
+                kw for kw in extracted_keywords if kw not in GENERIC_TERMS
+            ][:5]
+
+            # Always include capability name if not present
+            if capability.lower() not in specific_keywords:
+                specific_keywords = [capability.lower()] + specific_keywords[:4]
+
+            return specific_keywords[:5]
+
+        except Exception as exc:
+            # Fallback to naive extraction if LLM fails
+            if self.verbose:
+                print(f"[RESEARCH] Keyword extraction failed, using fallback: {exc}")
+
+            # Simple fallback: extract words, filter generic terms
+            words = [
+                word.lower().strip(".,!?")
+                for word in description.split()
+                if len(word) > 4 and word.lower() not in GENERIC_TERMS
+            ]
+
+            # Always start with capability name
+            keywords = [capability.lower()]
+            keywords.extend([w for w in words if w != capability.lower()][:4])
+
+            return keywords[:5]
+
     async def _research_capability(self, capability: str) -> dict[str, Any]:
         """Use web search to understand what the capability/tool is.
 
@@ -311,13 +422,11 @@ class DynamicOrchestrator:
             description = self._extract_response_text(result)
 
             if description:
-                # Extract keywords from description (simple approach)
-                # Future: use LLM to extract structured info
-                keywords = [
-                    word.lower().strip(".,!?")
-                    for word in description.split()
-                    if len(word) > 4  # Skip short words
-                ][:5]  # Top 5 keywords
+                # Extract structured keywords using LLM
+                keywords = await self._extract_keywords_with_llm(
+                    capability=capability,
+                    description=description,
+                )
 
                 if self.verbose:
                     print(f"[RESEARCH] Found: {description[:80]}...")
@@ -444,7 +553,7 @@ class DynamicOrchestrator:
         - 100 points: Exact match in qualified name
         - 80 points: Match in server name
         - 60 points: Match in description
-        - 40+ points: Keyword overlap with research
+        - 20-35 points: Keyword overlap with research (filtered, domain-specific)
         - 0 points: No match (FILTERED OUT)
 
         Args:
@@ -481,12 +590,14 @@ class DynamicOrchestrator:
             if capability_lower in description:
                 return 60
 
-            # Keyword overlap from research
+            # Keyword overlap from research (domain-specific, generic terms filtered)
             if research and research.get("keywords"):
                 keywords = research["keywords"]
                 matches = sum(1 for kw in keywords if kw.lower() in description)
                 if matches > 0:
-                    return 40 + (matches * 5)  # Bonus for multiple keyword matches
+                    # Lower base score (20 vs 40) since keywords are less reliable
+                    # Max 35 points for 3+ keyword matches
+                    return min(20 + (matches * 5), 35)
 
             return 0
 
