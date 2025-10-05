@@ -16,17 +16,36 @@ from tests.fixtures.mock_oauth import MockOAuthServer
 
 @pytest.mark.asyncio
 async def test_full_oauth_flow_with_mock_server() -> None:
-    """Test complete OAuth flow with Smithery hardcoded endpoints."""
-    # For Smithery-hosted servers, we use hardcoded endpoints (no discovery needed)
+    """Test complete OAuth flow with RFC 8414/9728 discovery (no hardcoded endpoints)."""
+    # Mock the RFC discovery endpoints to avoid hitting real servers
     resource_url = "https://server.smithery.ai/mcp"
 
-    # Discover OAuth metadata (should use Smithery hardcoded fallback)
-    oauth_config = await discover_oauth_metadata(resource_url)
+    # Mock httpx to return proper OAuth discovery metadata
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
 
-    # Verify Smithery hardcoded endpoints are used
-    assert oauth_config.authorization_endpoint == "https://auth.smithery.ai/oauth/authorize"
-    assert oauth_config.token_endpoint == "https://auth.smithery.ai/oauth/token"
-    assert oauth_config.resource == resource_url
+        # Mock RFC 9728 Protected Resource Metadata response
+        oauth_discovery_response = Mock()
+        oauth_discovery_response.status_code = 200
+        oauth_discovery_response.json.return_value = {
+            "resource": resource_url,
+            "authorization_servers": ["https://auth.example.com"],
+            "authorization_endpoint": "https://auth.example.com/oauth/authorize",
+            "token_endpoint": "https://auth.example.com/oauth/token",
+            "scopes_supported": ["read", "write"],
+        }
+        oauth_discovery_response.raise_for_status = Mock()
+
+        mock_client.get = AsyncMock(return_value=oauth_discovery_response)
+
+        # Discover OAuth metadata (should use RFC discovery)
+        oauth_config = await discover_oauth_metadata(resource_url)
+
+        # Verify discovered endpoints (not hardcoded)
+        assert oauth_config.authorization_endpoint == "https://auth.example.com/oauth/authorize"
+        assert oauth_config.token_endpoint == "https://auth.example.com/oauth/token"
+        assert oauth_config.resource == resource_url
 
 
 @pytest.mark.asyncio

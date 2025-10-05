@@ -71,6 +71,73 @@ class OAuthConfig(BaseModel):
     token_types_supported: list[str] = Field(default_factory=lambda: ["Bearer"])
 
 
+async def validate_oauth_url(url: str) -> tuple[bool, str]:
+    """Validate OAuth URL before opening browser.
+
+    Performs safety checks on the authorization URL:
+    1. Must use HTTPS (not HTTP)
+    2. Must be a valid URL format
+    3. Domain must be resolvable
+    4. Endpoint should be accessible (HEAD request)
+
+    Args:
+        url: The OAuth authorization URL to validate.
+
+    Returns:
+        Tuple of (is_valid, error_message).
+        - (True, "") if URL is valid and safe
+        - (False, "error description") if validation fails
+
+    Example:
+        >>> is_valid, error = await validate_oauth_url("https://auth.example.com/authorize")
+        >>> if not is_valid:
+        ...     print(f"Invalid URL: {error}")
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Check 1: Must use HTTPS
+        if parsed.scheme != "https":
+            return (
+                False,
+                f"OAuth URL must use HTTPS, got {parsed.scheme}://{parsed.netloc}. "
+                "Opening non-HTTPS authorization URLs is a security risk.",
+            )
+
+        # Check 2: Must have valid netloc (domain)
+        if not parsed.netloc:
+            return (False, f"Invalid URL format: {url}")
+
+        # Check 3: Try to access the URL (HEAD request)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            try:
+                response = await client.head(url, follow_redirects=True)
+                # Accept 200 OK, 405 Method Not Allowed (HEAD not supported), or 4xx client errors
+                # Many OAuth endpoints don't support HEAD, so we're lenient
+                if response.status_code < 500:
+                    return (True, "")
+                return (
+                    False,
+                    f"OAuth endpoint returned server error: {response.status_code}. "
+                    "The authorization server may be down.",
+                )
+            except httpx.ConnectError:
+                return (
+                    False,
+                    f"Cannot connect to {parsed.netloc}. "
+                    "Check the OAuth server URL or your internet connection.",
+                )
+            except httpx.TimeoutException:
+                return (
+                    False,
+                    f"Timeout connecting to {parsed.netloc}. "
+                    "The server may be slow or unreachable.",
+                )
+
+    except Exception as exc:
+        return (False, f"URL validation error: {exc}")
+
+
 class PKCEAuthenticator:
     """OAuth 2.1 PKCE (Proof Key for Code Exchange) authenticator.
 
@@ -442,6 +509,15 @@ class BrowserAuthHandler:
         server_thread.start()
 
         try:
+            # Validate OAuth URL before opening browser
+            is_valid, error = await validate_oauth_url(auth_url)
+            if not is_valid:
+                raise OAuthError(
+                    f"OAuth URL validation failed: {error}\n\n"
+                    f"The authorization URL may be incorrect or unsafe. "
+                    f"Please check the MCP server configuration."
+                )
+
             # Open browser
             print(f"Opening browser for authorization: {auth_url}")
             print(f"Listening for callback on {self.redirect_uri}")
@@ -670,24 +746,13 @@ async def discover_oauth_metadata(resource_url: str) -> OAuthConfig:
         OAuthError: If discovery fails.
 
     Example:
-        >>> config = await discover_oauth_metadata("https://mcp.smithery.ai/servers/github/mcp")
+        >>> config = await discover_oauth_metadata("https://example.com/mcp")
         >>> print(config.authorization_endpoint)
-        https://auth.smithery.ai/oauth/authorize
+        https://example.com/oauth/authorize  # Discovered via RFC 8414/9728
     """
     # Parse resource URL to get base
     parsed = urlparse(resource_url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
-
-    # Check if this is a Smithery-hosted server (use known endpoints)
-    if "server.smithery.ai" in resource_url:
-        # Smithery uses centralized auth server
-        return OAuthConfig(
-            authorization_endpoint="https://auth.smithery.ai/oauth/authorize",
-            token_endpoint="https://auth.smithery.ai/oauth/token",
-            resource=resource_url,
-            scopes=["read", "write"],
-            token_types_supported=["Bearer"],
-        )
 
     # RFC 8414 Authorization Server Metadata (MCP specification)
     # Try primary endpoint first

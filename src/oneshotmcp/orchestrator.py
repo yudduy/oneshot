@@ -285,7 +285,9 @@ class DynamicOrchestrator:
             ['vercel', 'deployment', 'hosting', 'edge', 'serverless']
         """
         # Generic terms to filter out (too common in tech)
+        # These terms appear in many MCP descriptions but don't help differentiate servers
         GENERIC_TERMS = {
+            # Infrastructure & architecture
             "cloud",
             "platform",
             "server",
@@ -304,12 +306,43 @@ class DynamicOrchestrator:
             "integration",
             "interface",
             "protocol",
+            "infrastructure",
+            "services",
+            # Development roles & contexts
+            "frontend",
+            "backend",
+            "fullstack",
+            "developers",
+            "development",
+            "developer",
+            "apps",
+            "applications",
+            "websites",
+            "website",
+            # Deployment & hosting
+            "deployment",
+            "hosting",
+            "deploy",
+            "hosted",
+            "modern",
+            "quickly",
+            "fast",
+            "scalable",
+            # Generic verbs & adjectives
             "primarily",
             "focused",
             "provides",
             "enables",
             "allows",
             "helps",
+            "powerful",
+            "simple",
+            "easy",
+            "build",
+            "create",
+            "manage",
+            "using",
+            "with",
         }
 
         try:
@@ -324,11 +357,13 @@ Requirements:
 1. Include the capability name itself ('{capability}')
 2. Extract company/service names (e.g., 'vercel', 'github', 'stripe')
 3. Extract specific technologies (e.g., 'postgresql', 'redis', 'graphql')
-4. Extract domain-specific terms (e.g., 'deployment', 'authentication', 'billing')
-5. EXCLUDE generic terms: {', '.join(list(GENERIC_TERMS)[:10])}...
+4. Extract domain-specific terms (e.g., 'edge', 'serverless', 'authentication', 'billing')
+5. EXCLUDE ALL generic tech terms like: platform, cloud, server, service, api, framework,
+   frontend, backend, developers, development, deployment, hosting, application, website, etc.
 
 Return ONLY the keywords as a comma-separated list, nothing else.
-Example: vercel, deployment, edge, serverless"""
+Example for "vercel": vercel, edge, serverless, nextjs
+Example for "github": github, repository, git, pull-request"""
 
             # Use the same model instance
             response = await self.model.ainvoke([HumanMessage(content=prompt)])
@@ -550,10 +585,11 @@ Example: vercel, deployment, edge, serverless"""
         """Rank servers by relevance to the requested capability.
 
         Scoring criteria (higher is better):
+        - 120 points: Direct pattern match (@{capability}/* or @smithery/{capability})
         - 100 points: Exact match in qualified name
         - 80 points: Match in server name
         - 60 points: Match in description
-        - 20-35 points: Keyword overlap with research (filtered, domain-specific)
+        - 10-20 points: Keyword overlap (REDUCED, excluding capability name itself)
         - 0 points: No match (FILTERED OUT)
 
         Args:
@@ -578,7 +614,12 @@ Example: vercel, deployment, edge, serverless"""
             description = (server.get("description") or "").lower()
             capability_lower = capability.lower()
 
-            # Exact match in qualified name (highest priority)
+            # Direct pattern match (HIGHEST priority - follows MCP naming conventions)
+            # @{capability}/* or @smithery/{capability}
+            if qualified_name.startswith(f"@{capability_lower}/") or qualified_name == f"@smithery/{capability_lower}":
+                return 120
+
+            # Exact match in qualified name (high priority)
             if capability_lower in qualified_name:
                 return 100
 
@@ -590,14 +631,19 @@ Example: vercel, deployment, edge, serverless"""
             if capability_lower in description:
                 return 60
 
-            # Keyword overlap from research (domain-specific, generic terms filtered)
+            # Keyword overlap from research (REDUCED scoring, more conservative)
+            # Excludes capability name itself to avoid inflated scores
             if research and research.get("keywords"):
                 keywords = research["keywords"]
-                matches = sum(1 for kw in keywords if kw.lower() in description)
-                if matches > 0:
-                    # Lower base score (20 vs 40) since keywords are less reliable
-                    # Max 35 points for 3+ keyword matches
-                    return min(20 + (matches * 5), 35)
+                # Filter out the capability name from keyword matching
+                filtered_keywords = [kw for kw in keywords if kw.lower() != capability_lower]
+
+                if filtered_keywords:
+                    matches = sum(1 for kw in filtered_keywords if kw.lower() in description)
+                    if matches > 0:
+                        # Much lower base score: 10 + 3 per match, max 20
+                        # This prevents fuzzy matches from ranking above exact matches
+                        return min(10 + (matches * 3), 20)
 
             return 0
 
@@ -927,12 +973,103 @@ Example: vercel, deployment, edge, serverless"""
             f"   • Search for alternative servers: https://smithery.ai/search?q={capability}"
         )
 
+    async def _enhanced_search_for_capability(
+        self, capability: str
+    ) -> list[dict[str, Any]]:
+        """Enhanced search with direct pattern matching.
+
+        Tries exact MCP naming patterns first for high-precision matches:
+        1. @{capability}/* (e.g., @vercel/deployment-mcp)
+        2. @smithery/{capability} (official Smithery server)
+        3. Then falls back to multi-query text search
+
+        This improves accuracy by prioritizing servers that follow MCP
+        naming conventions (org/repo structure).
+
+        Args:
+            capability: Capability name (e.g., "vercel", "github").
+
+        Returns:
+            Deduplicated list of server candidates.
+
+        Example:
+            >>> candidates = await orchestrator._enhanced_search_for_capability("vercel")
+            >>> # Will find @vercel/*, @smithery/vercel, then text matches
+        """
+        all_results: list[dict[str, Any]] = []
+
+        # Phase 1: Try direct pattern matches (most reliable)
+        direct_patterns = [
+            f"@{capability}",  # Exact org match (e.g., @vercel/*)
+            f"@smithery/{capability}",  # Official Smithery package
+        ]
+
+        for pattern in direct_patterns:
+            try:
+                if self.verbose:
+                    print(f"[SEARCH] Trying direct pattern: '{pattern}'...")
+
+                results = await self.smithery.search(query=pattern, limit=5)
+
+                if results:
+                    if self.verbose:
+                        print(
+                            f"[SEARCH] ✓ Found {len(results)} result(s) with pattern '{pattern}'"
+                        )
+                    all_results.extend(results)
+
+            except Exception as exc:
+                if self.verbose:
+                    print(f"[SEARCH] Error with pattern '{pattern}': {exc}")
+                continue
+
+        # Phase 2: Fall back to multi-query text search
+        # (Only if direct patterns found nothing or few results)
+        if len(all_results) < 3:
+            if self.verbose:
+                print(
+                    f"[SEARCH] Direct patterns found {len(all_results)} result(s), "
+                    f"falling back to multi-query search..."
+                )
+
+            # Generate multiple query variations
+            queries = [
+                capability,  # Original
+                f"{capability} mcp",  # With MCP suffix
+                f"{capability} server",  # With server suffix
+            ]
+
+            for query in queries:
+                try:
+                    if self.verbose:
+                        print(f"[SEARCH] Trying text query: '{query}'...")
+
+                    results = await self.smithery.search(query=query, limit=5)
+
+                    if results:
+                        if self.verbose:
+                            print(f"[SEARCH] Found {len(results)} result(s) for '{query}'")
+                        all_results.extend(results)
+
+                except Exception as exc:
+                    if self.verbose:
+                        print(f"[SEARCH] Error searching '{query}': {exc}")
+                    continue
+
+        # Deduplicate combined results
+        unique = self._deduplicate_servers(all_results)
+
+        if self.verbose:
+            print(f"[SEARCH] Total unique candidates: {len(unique)}")
+
+        return unique
+
     async def _discover_and_add_server(self, capability: str) -> bool:
         """Intelligent multi-phase MCP server discovery.
 
         This method orchestrates a 5-phase discovery process:
         1. Research: Use web search to understand the capability
-        2. Multi-Query Search: Try multiple search variations
+        2. Enhanced Search: Direct pattern matching + multi-query fallback
         3. Ranking: Score candidates by relevance
         4. Multi-Attempt: Try top candidates, skip OAuth errors
         5. Fallback: Suggest alternatives if all fail
@@ -954,9 +1091,8 @@ Example: vercel, deployment, edge, serverless"""
         # Phase 1: Research the capability (if Tavily available)
         research = await self._research_capability(capability)
 
-        # Phase 2: Generate search queries and execute multi-query search
-        queries = self._generate_search_queries(capability, research)
-        candidates = await self._search_with_refinement(queries)
+        # Phase 2: Enhanced search with direct pattern matching
+        candidates = await self._enhanced_search_for_capability(capability)
 
         if not candidates:
             if self.verbose:
