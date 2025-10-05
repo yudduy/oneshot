@@ -13,8 +13,9 @@ from .config import (
     StdioServerSpec,
     servers_to_mcp_config,
 )
+from .oauth import validate_oauth_url
 from .orchestrator import DynamicOrchestrator
-from .registry import RegistryError, SmitheryAPIClient
+from .registry import OAuthRequired, RegistryError, SmitheryAPIClient
 from .tools import MCPToolLoader, ToolInfo
 
 __all__ = [
@@ -28,5 +29,7 @@ __all__ = [
     "build_deep_agent",
     "SmitheryAPIClient",
     "RegistryError",
+    "OAuthRequired",
     "DynamicOrchestrator",
+    "validate_oauth_url",
 ]

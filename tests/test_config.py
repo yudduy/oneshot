@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deepmcpagent.config import HTTPServerSpec, StdioServerSpec, servers_to_mcp_config
+from oneshotmcp.config import HTTPServerSpec, StdioServerSpec, servers_to_mcp_config
 
 
 def test_servers_to_mcp_config_http_only() -> None:
@@ -36,7 +36,8 @@ def test_servers_to_mcp_config_stdio() -> None:
     assert entry["transport"] == "stdio"
     assert entry["command"] == "python"
     assert entry["args"] == ["-m", "cool.server"]
-    # None becomes None, empty dict should be allowed
+    # env with values is included
     assert entry["env"] == {"API_KEY": "abc"}
-    assert entry["cwd"] is None
+    # cwd=None is omitted (FastMCP doesn't accept None)
+    assert "cwd" not in entry
     assert entry["keep_alive"] is False

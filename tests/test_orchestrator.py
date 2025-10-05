@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from deepmcpagent.config import HTTPServerSpec
+from oneshotmcp.config import HTTPServerSpec
 
 
 @pytest.mark.asyncio
 async def test_preserves_messages_across_rebuild() -> None:
     """Test that messages stay intact when agent is rebuilt."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     # Create orchestrator with minimal setup
     orchestrator = DynamicOrchestrator(
@@ -22,7 +22,7 @@ async def test_preserves_messages_across_rebuild() -> None:
     )
 
     # Mock the agent graph
-    with patch("deepmcpagent.orchestrator.build_deep_agent") as mock_build:
+    with patch("oneshotmcp.orchestrator.build_deep_agent") as mock_build:
         mock_graph = AsyncMock()
         mock_loader = Mock()
         mock_build.return_value = (mock_graph, mock_loader)
@@ -43,7 +43,7 @@ async def test_preserves_messages_across_rebuild() -> None:
 @pytest.mark.asyncio
 async def test_multiple_rebuilds_dont_lose_context() -> None:
     """Test that we can rebuild 5+ times without losing history."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -51,7 +51,7 @@ async def test_multiple_rebuilds_dont_lose_context() -> None:
         smithery_key="test_key",
     )
 
-    with patch("deepmcpagent.orchestrator.build_deep_agent") as mock_build:
+    with patch("oneshotmcp.orchestrator.build_deep_agent") as mock_build:
         mock_graph = AsyncMock()
         mock_loader = Mock()
         mock_build.return_value = (mock_graph, mock_loader)
@@ -70,7 +70,7 @@ async def test_multiple_rebuilds_dont_lose_context() -> None:
 @pytest.mark.asyncio
 async def test_rebuild_updates_graph_and_loader() -> None:
     """Test that rebuild replaces graph and loader references."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -78,7 +78,7 @@ async def test_rebuild_updates_graph_and_loader() -> None:
         smithery_key="test_key",
     )
 
-    with patch("deepmcpagent.orchestrator.build_deep_agent") as mock_build:
+    with patch("oneshotmcp.orchestrator.build_deep_agent") as mock_build:
         # First build
         mock_graph1 = AsyncMock()
         mock_loader1 = Mock()
@@ -101,7 +101,7 @@ async def test_rebuild_updates_graph_and_loader() -> None:
 @pytest.mark.asyncio
 async def test_rebuild_uses_current_servers() -> None:
     """Test that rebuild passes current servers to build_deep_agent."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     initial_servers = {
         "math": HTTPServerSpec(url="http://localhost:8000/mcp", transport="http")
@@ -113,7 +113,7 @@ async def test_rebuild_uses_current_servers() -> None:
         smithery_key="test_key",
     )
 
-    with patch("deepmcpagent.orchestrator.build_deep_agent") as mock_build:
+    with patch("oneshotmcp.orchestrator.build_deep_agent") as mock_build:
         mock_graph = AsyncMock()
         mock_loader = Mock()
         mock_build.return_value = (mock_graph, mock_loader)
@@ -131,7 +131,7 @@ async def test_rebuild_uses_current_servers() -> None:
 @pytest.mark.asyncio
 async def test_rebuild_with_added_server() -> None:
     """Test that rebuild includes newly added servers."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -139,7 +139,7 @@ async def test_rebuild_with_added_server() -> None:
         smithery_key="test_key",
     )
 
-    with patch("deepmcpagent.orchestrator.build_deep_agent") as mock_build:
+    with patch("oneshotmcp.orchestrator.build_deep_agent") as mock_build:
         mock_graph = AsyncMock()
         mock_loader = Mock()
         mock_build.return_value = (mock_graph, mock_loader)
@@ -161,7 +161,7 @@ async def test_rebuild_with_added_server() -> None:
 @pytest.mark.asyncio
 async def test_external_message_storage() -> None:
     """Test that messages are stored externally, not in graph."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -184,7 +184,7 @@ async def test_external_message_storage() -> None:
 @pytest.mark.asyncio
 async def test_initialization_with_servers() -> None:
     """Test that orchestrator initializes with provided servers."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     initial_servers = {
         "math": HTTPServerSpec(url="http://localhost:8000/mcp", transport="http"),
@@ -207,7 +207,7 @@ async def test_initialization_with_servers() -> None:
 @pytest.mark.asyncio
 async def test_smithery_client_initialization() -> None:
     """Test that Smithery client is initialized with API key."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -223,7 +223,7 @@ async def test_smithery_client_initialization() -> None:
 @pytest.mark.asyncio
 async def test_model_storage() -> None:
     """Test that model parameter is stored correctly."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="anthropic:claude-3-5-sonnet-latest",
@@ -237,7 +237,7 @@ async def test_model_storage() -> None:
 @pytest.mark.asyncio
 async def test_rebuild_handles_build_failure() -> None:
     """Test that rebuild handles build_deep_agent failures gracefully."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -245,7 +245,7 @@ async def test_rebuild_handles_build_failure() -> None:
         smithery_key="test_key",
     )
 
-    with patch("deepmcpagent.orchestrator.build_deep_agent") as mock_build:
+    with patch("oneshotmcp.orchestrator.build_deep_agent") as mock_build:
         mock_build.side_effect = Exception("Build failed")
 
         # Rebuild should raise the exception
@@ -264,7 +264,7 @@ async def test_rebuild_handles_build_failure() -> None:
 
 def test_needs_tools_detects_missing_access() -> None:
     """Test detection of 'I don't have access to' pattern."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -278,7 +278,7 @@ def test_needs_tools_detects_missing_access() -> None:
 
 def test_needs_tools_detects_cannot() -> None:
     """Test detection of 'I cannot' pattern."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -292,7 +292,7 @@ def test_needs_tools_detects_cannot() -> None:
 
 def test_needs_tools_detects_unable() -> None:
     """Test detection of 'I'm unable to' pattern."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -306,7 +306,7 @@ def test_needs_tools_detects_unable() -> None:
 
 def test_needs_tools_detects_no_tools() -> None:
     """Test detection of 'no tools available' pattern."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -320,7 +320,7 @@ def test_needs_tools_detects_no_tools() -> None:
 
 def test_needs_tools_false_on_normal_response() -> None:
     """Test that normal responses don't trigger tool detection."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -334,7 +334,7 @@ def test_needs_tools_false_on_normal_response() -> None:
 
 def test_needs_tools_false_on_success() -> None:
     """Test that successful tool usage doesn't trigger detection."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -348,7 +348,7 @@ def test_needs_tools_false_on_success() -> None:
 
 def test_needs_tools_case_insensitive() -> None:
     """Test that detection is case-insensitive."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -362,7 +362,7 @@ def test_needs_tools_case_insensitive() -> None:
 
 def test_extract_capability_from_github() -> None:
     """Test extraction of 'github' capability."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -377,7 +377,7 @@ def test_extract_capability_from_github() -> None:
 
 def test_extract_capability_from_weather() -> None:
     """Test extraction of 'weather' capability."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -392,7 +392,7 @@ def test_extract_capability_from_weather() -> None:
 
 def test_extract_capability_from_database() -> None:
     """Test extraction of 'database' capability."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -407,7 +407,7 @@ def test_extract_capability_from_database() -> None:
 
 def test_extract_capability_returns_none_when_unclear() -> None:
     """Test that capability extraction returns None when unclear."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",
@@ -422,7 +422,7 @@ def test_extract_capability_returns_none_when_unclear() -> None:
 
 def test_extract_capability_handles_multiple_keywords() -> None:
     """Test that we extract the most relevant capability."""
-    from deepmcpagent.orchestrator import DynamicOrchestrator
+    from oneshotmcp.orchestrator import DynamicOrchestrator
 
     orchestrator = DynamicOrchestrator(
         model="openai:gpt-4",

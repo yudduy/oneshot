@@ -64,28 +64,29 @@
 
 ## 🚀 Installation
 
-Install from [PyPI](https://pypi.org/project/deepmcpagent/):
+Install from [PyPI](https://pypi.org/project/oneshotmcp/):
 
 ```bash
-pip install "deepmcpagent[deep]"
+pip install "oneshotmcp[deep]"
 ```
 
-This installs DeepMCPAgent with **DeepAgents support (recommended)** for the best agent loop.
+This installs OneShotMCP with **DeepAgents support (recommended)** for the best agent loop.
 Other optional extras:
 
+- `deep` → DeepAgents loop (recommended)
 - `dev` → linting, typing, tests
 - `docs` → MkDocs + Material + mkdocstrings
 - `examples` → dependencies used by bundled examples
 
 ```bash
 # install with deepagents + dev tooling
-pip install "deepmcpagent[deep,dev]"
+pip install "oneshotmcp[deep,dev]"
 ```
 
-⚠️ If you’re using **zsh**, remember to quote extras:
+⚠️ If you're using **zsh**, remember to quote extras:
 
 ```bash
-pip install "deepmcpagent[deep,dev]"
+pip install "oneshotmcp[deep,dev]"
 ```
 
 ---
@@ -99,15 +100,16 @@ pip install "deepmcpagent[deep,dev]"
 ```bash
 # Set up your API keys
 export SMITHERY_API_KEY="your_smithery_key"  # Get from https://smithery.ai
-export OPENAI_API_KEY="your_openai_key"      # Or any other LLM provider
 export TAVILY_API_KEY="tvly-..."            # Optional: Get from https://tavily.com for web search
 
-# Run dynamic agent
+# Optional: Configure model (defaults to gpt-4.1-nano)
+export ONESHOT_MODEL="openai:gpt-4"          # Or anthropic:claude-sonnet-3.5-v2, etc.
+
+# Run the agent (that's it!)
+oneshot
+
 # With Tavily: starts with web search capability pre-configured
 # Without Tavily: starts with zero servers, discovers on-demand
-deepmcpagent run-dynamic \
-  --model-id "openai:gpt-4" \
-  --smithery-key "$SMITHERY_API_KEY"
 
 # Or try the example script
 python examples/dynamic_agent.py
@@ -150,15 +152,16 @@ The `DynamicOrchestrator` automatically discovers and adds MCP servers when the 
 
 ```python
 import asyncio
-from deepmcpagent import DynamicOrchestrator
+from oneshotmcp import DynamicOrchestrator
 
 async def main():
     # Create orchestrator with zero initial servers
     orchestrator = DynamicOrchestrator(
-        model="openai:gpt-4",              # Or any LangChain model instance
+        model="openai:gpt-4.1-nano",       # Or any LangChain model instance
         initial_servers={},                # Start with nothing!
         smithery_key="your_smithery_key",  # From https://smithery.ai
-        instructions="You are a helpful assistant."
+        instructions="You are a helpful assistant.",
+        verbose=True,                      # Show LLM reasoning and tool calls
     )
 
     # Ask for something requiring GitHub tools (not configured)
@@ -194,7 +197,7 @@ OneShotMCP lets you pass **any LangChain chat model instance** (or a provider id
 
 ```python
 import asyncio
-from deepmcpagent import HTTPServerSpec, build_deep_agent
+from oneshotmcp import HTTPServerSpec, build_deep_agent
 
 # choose your model:
 # from langchain_openai import ChatOpenAI

@@ -7,6 +7,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Context length management: limit tools loaded per server
+# This prevents context window overflow with models like gpt-4.1-nano (8K tokens)
+# Adjust based on your model's context window:
+# - Small models (gpt-4.1-nano, 8K): 20-30 tools
+# - Medium models (gpt-4-turbo, 128K): 50-100 tools
+# - Large models (claude-sonnet-3.5-v2, 200K): 100+ tools
+MAX_TOOLS_PER_SERVER = 30
+
 
 class _BaseServer(BaseModel):
     """Base model for server specs."""
@@ -69,22 +77,27 @@ def servers_to_mcp_config(servers: Mapping[str, ServerSpec]) -> dict[str, dict[s
     cfg: dict[str, dict[str, object]] = {}
     for name, s in servers.items():
         if isinstance(s, StdioServerSpec):
-            cfg[name] = {
+            stdio_entry: dict[str, object] = {
                 "transport": "stdio",
                 "command": s.command,
                 "args": s.args,
-                "env": s.env or None,
-                "cwd": s.cwd or None,
                 "keep_alive": s.keep_alive,
             }
+            # Only include env if it has values (FastMCP doesn't accept None)
+            if s.env:
+                stdio_entry["env"] = s.env
+            # Only include cwd if set
+            if s.cwd is not None:
+                stdio_entry["cwd"] = s.cwd
+            cfg[name] = stdio_entry
         else:
-            entry: dict[str, object] = {
+            http_entry: dict[str, object] = {
                 "transport": s.transport,
                 "url": s.url,
             }
             if s.headers:
-                entry["headers"] = s.headers
+                http_entry["headers"] = s.headers
             if s.auth is not None:
-                entry["auth"] = s.auth
-            cfg[name] = entry
+                http_entry["auth"] = s.auth
+            cfg[name] = http_entry
     return cfg

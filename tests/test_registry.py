@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from deepmcpagent.config import HTTPServerSpec
+from oneshotmcp.config import HTTPServerSpec
 
 # Mock HTTP responses
 MOCK_SEARCH_RESPONSE = {
@@ -27,66 +27,100 @@ MOCK_SEARCH_RESPONSE = {
 MOCK_SERVER_METADATA = {
     "qualified_name": "@smithery/github",
     "name": "github",
-    "url": "https://mcp.smithery.ai/servers/github/mcp",
-    "transport": "http",
     "description": "GitHub API tools",
+    "connections": [
+        {
+            "deploymentUrl": "https://example.com/mcp/github",
+            "type": "http",
+        }
+    ],
 }
 
 
 @pytest.mark.asyncio
 async def test_search_returns_server_list() -> None:
     """Test that search returns a list of servers from Smithery."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_SEARCH_RESPONSE
-        mock_post.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         results = await client.search("github")
 
         assert len(results) == 2
         assert results[0]["qualified_name"] == "@smithery/github"
         assert results[1]["qualified_name"] == "@smithery/weather"
-        mock_post.assert_called_once()
+
+        # Verify GET was called with correct params
+        mock_client.get.assert_called_once()
+        call_args = mock_client.get.call_args
+        assert "servers" in call_args[0][0]  # URL contains /servers
+        assert call_args[1]["params"] == {"q": "github", "pageSize": 5}
+        assert call_args[1]["headers"]["Authorization"] == "Bearer test_key"
 
 
 @pytest.mark.asyncio
 async def test_get_server_returns_http_spec() -> None:
     """Test that get_server returns a valid HTTPServerSpec."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.get") as mock_get:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_SERVER_METADATA
-        mock_get.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         spec = await client.get_server("@smithery/github")
 
         assert isinstance(spec, HTTPServerSpec)
-        assert spec.url == "https://mcp.smithery.ai/servers/github/mcp"
+        assert spec.url == "https://example.com/mcp/github"
         assert spec.transport == "http"
-        mock_get.assert_called_once()
+        mock_client.get.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_search_caches_results() -> None:
     """Test that repeated searches use cache and don't make redundant API calls."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_SEARCH_RESPONSE
-        mock_post.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         # First call - should hit API
         results1 = await client.search("github")
@@ -98,21 +132,29 @@ async def test_search_caches_results() -> None:
         assert results1 == results2
 
         # Should only call API once due to caching
-        assert mock_post.call_count == 1
+        assert mock_client.get.call_count == 1
 
 
 @pytest.mark.asyncio
 async def test_get_server_caches_results() -> None:
     """Test that get_server caches HTTPServerSpec objects."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.get") as mock_get:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_SERVER_METADATA
-        mock_get.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         # First call
         spec1 = await client.get_server("@smithery/github")
@@ -121,22 +163,36 @@ async def test_get_server_caches_results() -> None:
 
         assert spec1.url == spec2.url
         # Should only call API once
-        assert mock_get.call_count == 1
+        assert mock_client.get.call_count == 1
 
 
 @pytest.mark.asyncio
 async def test_search_handles_404() -> None:
     """Test graceful handling of not found responses."""
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from httpx import HTTPStatusError, Request, Response
+
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_response = Mock()
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock a 404 response
+        mock_response = AsyncMock()
         mock_response.status_code = 404
         mock_response.text = "Not found"
-        mock_response.raise_for_status.side_effect = Exception("404 Not Found")
-        mock_post.return_value = mock_response
+
+        # Create proper HTTPStatusError
+        request = Request("GET", "https://registry.smithery.ai/servers")
+        response = Response(404, text="Not found", request=request)
+        mock_response.raise_for_status.side_effect = HTTPStatusError(
+            "404 Not Found", request=request, response=response
+        )
+
+        mock_client.get.return_value = mock_response
 
         with pytest.raises(RegistryError, match="Failed to search"):
             await client.search("nonexistent")
@@ -145,15 +201,30 @@ async def test_search_handles_404() -> None:
 @pytest.mark.asyncio
 async def test_get_server_handles_404() -> None:
     """Test graceful handling of not found server."""
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from httpx import HTTPStatusError, Request, Response
+
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.get") as mock_get:
-        mock_response = Mock()
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock a 404 response
+        mock_response = AsyncMock()
         mock_response.status_code = 404
-        mock_response.raise_for_status.side_effect = Exception("404 Not Found")
-        mock_get.return_value = mock_response
+        mock_response.text = "Not found"
+
+        # Create proper HTTPStatusError
+        request = Request("GET", "https://registry.smithery.ai/servers/%40nonexistent%2Fserver")
+        response = Response(404, text="Not found", request=request)
+        mock_response.raise_for_status.side_effect = HTTPStatusError(
+            "404 Not Found", request=request, response=response
+        )
+
+        mock_client.get.return_value = mock_response
 
         with pytest.raises(RegistryError, match="Failed to get server"):
             await client.get_server("@nonexistent/server")
@@ -162,30 +233,51 @@ async def test_get_server_handles_404() -> None:
 @pytest.mark.asyncio
 async def test_search_handles_timeout() -> None:
     """Test timeout handling with appropriate error message."""
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from httpx import TimeoutException
+
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_post.side_effect = TimeoutError("Request timeout")
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        with pytest.raises(RegistryError, match="timeout"):
+        # Mock timeout exception
+        mock_client.get.side_effect = TimeoutException("Request timeout")
+
+        with pytest.raises(RegistryError, match="failed after 3 attempts"):
             await client.search("github")
 
 
 @pytest.mark.asyncio
 async def test_search_handles_500_error() -> None:
     """Test handling of server errors."""
-    from deepmcpagent.registry import RegistryError, SmitheryAPIClient
+    from httpx import HTTPStatusError, Request, Response
+
+    from oneshotmcp.registry import RegistryError, SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_response = Mock()
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock a 500 response
+        mock_response = AsyncMock()
         mock_response.status_code = 500
         mock_response.text = "Internal server error"
-        mock_response.raise_for_status.side_effect = Exception("500 Internal Server Error")
-        mock_post.return_value = mock_response
+
+        # Create proper HTTPStatusError
+        request = Request("GET", "https://registry.smithery.ai/servers")
+        response = Response(500, text="Internal server error", request=request)
+        mock_response.raise_for_status.side_effect = HTTPStatusError(
+            "500 Internal Server Error", request=request, response=response
+        )
+
+        mock_client.get.return_value = mock_response
 
         with pytest.raises(RegistryError, match="Failed to search"):
             await client.search("github")
@@ -194,37 +286,53 @@ async def test_search_handles_500_error() -> None:
 @pytest.mark.asyncio
 async def test_search_with_limit() -> None:
     """Test that search respects limit parameter."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_SEARCH_RESPONSE
-        mock_post.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         await client.search("github", limit=3)
 
-        # Verify limit was passed in request
-        call_args = mock_post.call_args
+        # Verify limit was passed in request params
+        call_args = mock_client.get.call_args
         assert call_args is not None
-        json_data = call_args.kwargs.get("json") or call_args[1].get("json")
-        assert json_data.get("limit") == 3
+        params = call_args[1]["params"]
+        assert params["pageSize"] == 3
 
 
 @pytest.mark.asyncio
 async def test_empty_search_results() -> None:
     """Test handling of empty search results."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response with empty results - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"servers": []}
-        mock_post.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         results = await client.search("nonexistent_capability")
 
@@ -234,20 +342,36 @@ async def test_empty_search_results() -> None:
 @pytest.mark.asyncio
 async def test_get_server_with_sse_transport() -> None:
     """Test that get_server correctly handles different transport types."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="test_key")
 
+    # Create metadata with SSE transport in connections
     metadata = {
-        **MOCK_SERVER_METADATA,
-        "transport": "sse",
+        "qualified_name": "@smithery/github",
+        "name": "github",
+        "description": "GitHub API tools",
+        "connections": [
+            {
+                "deploymentUrl": "https://example.com/mcp/github",
+                "type": "sse",
+            }
+        ],
     }
 
-    with patch("httpx.AsyncClient.get") as mock_get:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = metadata
-        mock_get.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         spec = await client.get_server("@smithery/github")
 
@@ -258,20 +382,28 @@ async def test_get_server_with_sse_transport() -> None:
 @pytest.mark.asyncio
 async def test_client_uses_api_key() -> None:
     """Test that API key is included in requests."""
-    from deepmcpagent.registry import SmitheryAPIClient
+    from oneshotmcp.registry import SmitheryAPIClient
 
     client = SmitheryAPIClient(api_key="secret_key_123")
 
-    with patch("httpx.AsyncClient.post") as mock_post:
+    with patch("httpx.AsyncClient") as mock_client_class:
+        # Mock the async context manager
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        # Mock the GET response - use Mock for sync methods
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = MOCK_SEARCH_RESPONSE
-        mock_post.return_value = mock_response
+        mock_response.raise_for_status = Mock()
+
+        # Make the async get() return the mock response
+        mock_client.get = AsyncMock(return_value=mock_response)
 
         await client.search("github")
 
         # Verify API key in headers
-        call_args = mock_post.call_args
-        headers = call_args.kwargs.get("headers") or call_args[1].get("headers")
+        call_args = mock_client.get.call_args
+        headers = call_args[1]["headers"]
         assert headers is not None
-        assert "Authorization" in headers or "X-API-Key" in headers
+        assert headers["Authorization"] == "Bearer secret_key_123"

@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel", "setuptools-scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepmcpagent"
+name = "oneshotmcp"
 dynamic = ["version"]
-description = "DeepMCPAgent: LangChain/LangGraph agents powered by MCP tools over FastMCP."
+description = "OneShotMCP: One prompt. Zero setup. Infinite MCP tools."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "fastmcp>=2.12.2", 
+  "fastmcp>=2.12.2",
   "langchain>=0.3.27",
   "pydantic>=2.8",
   "typer>=0.15.2",
@@ -30,6 +30,8 @@ dependencies = [
   "python-dotenv>=1.1",
   "langgraph>=0.6,<0.7",
   "langgraph-prebuilt>=0.6,<0.7",
+  "authlib>=1.6.5",
+  "cryptography>=43.0",
 ]
 [project.optional-dependencies]
 deep = [
@@ -52,10 +54,12 @@ dev = [
   "pytest-asyncio>=1.1",
   "mypy>=1.17",
   "ruff>=0.12",
+  "pytest-httpserver>=1.1",
+  "respx>=0.21",
 ]
 
 [project.scripts]
-deepmcpagent = "deepmcpagent.cli:app"
+oneshot = "oneshotmcp.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/cryxnet/deepmcpagent"
@@ -63,13 +67,13 @@ Issues = "https://github.com/cryxnet/deepmcpagent/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepmcpagent*"]
+include = ["oneshotmcp*"]
 
 [tool.setuptools.package-dir]
 "" = "src"
 
 [tool.setuptools.package-data]
-deepmcpagent = ["py.typed"]
+oneshotmcp = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.10"

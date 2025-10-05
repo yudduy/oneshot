@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DeepMCPAgent is a LangChain/LangGraph agent library that dynamically discovers and uses tools from MCP (Model Context Protocol) servers over HTTP/SSE. The library is model-agnostic and supports any LangChain chat model.
+OneShotMCP (formerly DeepMCPAgent) is a LangChain/LangGraph agent library that dynamically discovers and uses tools from MCP (Model Context Protocol) servers over HTTP/SSE. The library is model-agnostic and supports any LangChain chat model.
+
+**Package Name:** `oneshotmcp`
+**CLI Command:** `oneshot`
+**Default Model:** `openai:gpt-4.1-nano` (configurable via `ONESHOT_MODEL` env var)
 
 ## Key Architecture
 
@@ -23,9 +27,9 @@ MCP Server → FastMCP Client → `list_tools()` → JSON-Schema (inputSchema) �
 - **Fallback**: LangGraph ReAct agent (always available)
 - Model is REQUIRED (no fallback) — accepts string provider-id or LangChain model instance
 
-## Dynamic Tool Discovery (NEW)
+## Dynamic Tool Discovery
 
-DeepMCPAgent now supports **automatic MCP server discovery** via the `DynamicOrchestrator`. When the agent needs a tool it doesn't have, it can:
+OneShotMCP supports **automatic MCP server discovery** via the `DynamicOrchestrator`. When the agent needs a tool it doesn't have, it can:
 
 1. **Detect** the missing capability (pattern matching on LLM responses)
 2. **Search** the Smithery registry for matching MCP servers
@@ -36,7 +40,7 @@ DeepMCPAgent now supports **automatic MCP server discovery** via the `DynamicOrc
 
 - **`DynamicOrchestrator`** (`orchestrator.py`) - Manages conversation state, server lifecycle, and dynamic discovery
 - **`SmitheryAPIClient`** (`registry.py`) - Client for searching and fetching MCP servers from Smithery
-- **`run-dynamic` CLI command** - Interactive mode with auto-discovery enabled
+- **`oneshot` CLI command** - Simplified single-command interface with auto-discovery enabled by default
 
 ### How It Works
 
@@ -60,10 +64,16 @@ Agent: "Here are 10 MCP servers on GitHub..."  [Success!]
 
 **CLI:**
 ```bash
-deepmcpagent run-dynamic \
-  --model-id "openai:gpt-4" \
-  --smithery-key "sk_..." \
-  --http name=math url=http://localhost:8000/mcp  # Optional initial servers
+# Set up environment variables
+export SMITHERY_API_KEY="sk_..."
+export TAVILY_API_KEY="tvly_..."  # Optional: pre-configures web search
+export ONESHOT_MODEL="openai:gpt-4.1-nano"  # Optional: defaults to this
+
+# Run the agent (that's it!)
+oneshot
+
+# Or with custom initial server
+oneshot --http "name=math url=http://localhost:8000/mcp"
 
 # Then ask: "Search GitHub for MCP servers"
 # → Auto-discovers and adds GitHub server!
@@ -71,12 +81,13 @@ deepmcpagent run-dynamic \
 
 **Python API:**
 ```python
-from deepmcpagent import DynamicOrchestrator, HTTPServerSpec
+from oneshotmcp import DynamicOrchestrator, HTTPServerSpec
 
 orchestrator = DynamicOrchestrator(
-    model="openai:gpt-4",
+    model="openai:gpt-4.1-nano",
     initial_servers={},  # Start with no servers
     smithery_key="sk_...",
+    verbose=True,  # Show LLM reasoning and tool calls
 )
 
 response = await orchestrator.chat("What's the weather in SF?")
@@ -103,42 +114,58 @@ orchestrator.servers   # Active MCP servers (mutable)
 orchestrator.graph     # Agent graph (rebuilt when servers change)
 ```
 
-### Known Limitations
+### OAuth 2.1 Authentication (Fully Supported)
 
-#### Smithery-Hosted Servers Require OAuth
+**✨ Seamless Browser-Based Authentication**: OneShotMCP now fully supports OAuth 2.1 with PKCE for Smithery-hosted servers. Authentication happens automatically when needed - no manual commands required!
 
-**Problem:** Servers hosted on `server.smithery.ai` require OAuth 2.1 authentication with PKCE flow, which is not currently supported by the Python MCP SDK.
-
-**Impact:**
-- Many servers in the Smithery registry cannot be used via dynamic discovery
-- Agent will receive a `RegistryError` explaining the OAuth requirement
-- Discovery continues - agent may find alternative self-hosted servers
-
-**Example Error:**
+**How It Works:**
 ```
-⚠️  Cannot add '@ref-tools/ref-tools-mcp' for research:
-   Server '@ref-tools/ref-tools-mcp' is hosted on Smithery and requires
-   OAuth 2.1 authentication (not currently supported in Python MCP SDK).
-💡 Tip: You can manually configure this server if you have credentials,
-   or try a different query to find alternative servers.
+User: "fetch context7 mcp and use it"
+  ↓
+OneShotMCP: Detects @upstash/context7-mcp needs OAuth
+  ↓
+OneShotMCP: Opens browser for authorization
+  ↓
+[User clicks "Allow" in browser]
+  ↓
+OneShotMCP: ✓ Tokens saved, continues with original request
+  ↓
+OneShotMCP: Uses context7 to answer the query
 ```
 
-**Workarounds:**
-1. **Use pre-configured servers**: Set `TAVILY_API_KEY` for web search (doesn't require OAuth)
-2. **Self-host servers**: Deploy MCP servers yourself with simple token auth
-3. **Manual configuration**: If you have OAuth tokens, manually configure via `--http` flag
-4. **Wait for SDK support**: Track [smithery-ai/cli#336](https://github.com/smithery-ai/cli/issues/336)
+**Features:**
+- ✅ **RFC 7636 PKCE** with S256 challenge method
+- ✅ **RFC 9728 Discovery** for automatic OAuth endpoint detection
+- ✅ **Encrypted token storage** (Fernet, AES-128-CBC + HMAC)
+- ✅ **Automatic token refresh** when access tokens expire
+- ✅ **Token rotation** (OAuth 2.1 compliant)
+- ✅ **Zero manual configuration** - just authenticate when prompted
 
-**What Works:**
-- ✅ Self-hosted MCP servers (via HTTP/SSE)
+**Example Usage:**
+```bash
+export SMITHERY_API_KEY="sk_..."
+export OPENAI_API_KEY="sk-..."
+oneshot
+
+> fetch context7 mcp and search for vercel documentation
+# → Browser opens for OAuth authorization
+# → User authorizes once
+# → Agent uses context7 tools immediately
+# → Tokens persist for future sessions
+```
+
+**Supported:**
+- ✅ Smithery-hosted servers (`server.smithery.ai/*`)
+- ✅ OAuth 2.1 protected servers
+- ✅ Self-hosted MCP servers (HTTP/SSE)
 - ✅ Servers with simple auth (API key in URL/header)
 - ✅ Public servers without auth
-- ✅ Tavily, Brave Search (pre-configured with env vars)
 
-**What Doesn't Work:**
-- ❌ Smithery-hosted servers (`server.smithery.ai/*`)
-- ❌ OAuth 2.1 protected servers
-- ❌ Servers requiring browser-based login
+**Token Management:**
+- Tokens stored in `~/.config/oneshotmcp/tokens.json` (encrypted)
+- Automatic refresh when expired
+- Persists across sessions
+- File permissions: 0o600 (owner-only)
 
 #### Server Configuration Requirements
 
@@ -148,6 +175,29 @@ Some MCP servers (even self-hosted) require configuration like API keys. The Smi
 - Cannot inject credentials at runtime
 
 **Future Enhancement:** Auto-prompt users for required API keys during discovery.
+
+#### Context Length Management & Tool Filtering
+
+**Problem:** Some MCP servers expose dozens or hundreds of tools (e.g., Context7 with library-specific documentation tools). Loading all tool schemas into the LLM context can exceed token limits, especially with smaller models like `gpt-4.1-nano` (8K context).
+
+**Solution:** OneShotMCP implements smart tool filtering:
+
+1. **MAX_TOOLS_PER_SERVER** constant limits tools loaded per server (default: 30)
+2. **Query-based filtering** loads only tools matching user query keywords
+3. **Tool count logging** shows how many tools were loaded vs available (in verbose mode)
+
+**Example:**
+```
+[BUILD] Rebuilding agent with 2 server(s)...
+[BUILD] Loaded 25/150 tools from context7 (filtered by relevance)
+[BUILD] Loaded 8/8 tools from tavily
+[BUILD] Agent ready with 33 tool(s) total
+```
+
+**Configuration:**
+- Set `MAX_TOOLS_PER_SERVER` in `config.py` to adjust limit
+- Increase for models with larger context windows (Claude Sonnet 3.5: 200K)
+- Decrease for smaller models (gpt-4.1-nano: 8K)
 
 ### Recommended Server Setup
 
@@ -163,10 +213,9 @@ export OPENAI_API_KEY="..."       # LLM provider
 **Option 2: Use Hybrid Mode**
 ```bash
 # Start with Tavily + custom server
-deepmcpagent run-dynamic \
-  --model-id "openai:gpt-4" \
-  --smithery-key "sk_..." \
-  --http name=custom url=http://localhost:8000/mcp
+export SMITHERY_API_KEY="sk_..."
+export TAVILY_API_KEY="tvly_..."
+oneshot --http "name=custom url=http://localhost:8000/mcp"
 ```
 
 **Option 3: Self-Host Popular Servers**
@@ -217,15 +266,22 @@ python examples/use_agent.py
 
 ### Running CLI
 ```bash
-# List tools from HTTP server
-deepmcpagent list-tools \
-  --http name=math url=http://127.0.0.1:8000/mcp transport=http \
-  --model-id "openai:gpt-4.1"
+# Set up environment
+export SMITHERY_API_KEY="sk_..."
+export OPENAI_API_KEY="sk-..."  # For gpt-4.1-nano
 
-# Interactive agent session
-deepmcpagent run \
-  --http name=math url=http://127.0.0.1:8000/mcp transport=http \
-  --model-id "openai:gpt-4.1"
+# Run with dynamic discovery (default mode)
+oneshot
+
+# Run with custom initial server
+oneshot --http "name=math url=http://127.0.0.1:8000/mcp transport=http"
+
+# Show verbose logging (default: enabled)
+oneshot --verbose
+
+# Use different model
+export ONESHOT_MODEL="anthropic:claude-sonnet-3.5-v2"
+oneshot
 ```
 
 ## Code Standards
@@ -277,24 +333,34 @@ deepmcpagent run \
 ## File Structure
 
 ```
-src/deepmcpagent/
+src/oneshotmcp/
 ├── __init__.py          # Public API exports
-├── __main__.py          # Entry point for python -m deepmcpagent
+├── __main__.py          # Entry point for python -m oneshotmcp
 ├── config.py            # Server specs and config conversion
 ├── clients.py           # FastMCP multi-server client wrapper
 ├── tools.py             # MCP tool discovery and LangChain conversion
 ├── agent.py             # build_deep_agent() - main builder function
-├── cli.py               # Typer CLI (list-tools, run commands)
-└── prompt.py            # DEFAULT_SYSTEM_PROMPT
+├── cli.py               # Typer CLI (main oneshot command)
+├── prompt.py            # DEFAULT_SYSTEM_PROMPT
+├── oauth.py             # OAuth 2.1 PKCE authentication
+├── registry.py          # Smithery API client for MCP discovery
+└── orchestrator.py      # Dynamic tool discovery orchestrator
 
 tests/
 ├── test_config.py       # Server spec and config tests
 ├── test_tools_schema.py # JSON-Schema → Pydantic conversion tests
 ├── test_cli_parse.py    # CLI argument parsing tests
-└── test_agent.py        # Integration tests (may be skipped)
+├── test_agent.py        # Integration tests (may be skipped)
+├── test_oauth.py        # OAuth PKCE unit tests (15 tests)
+├── test_oauth_integration.py # OAuth integration tests (7 tests)
+├── test_registry.py     # Smithery API client tests
+├── test_orchestrator.py # Dynamic discovery tests
+└── fixtures/
+    └── mock_oauth.py    # Mock OAuth server (RFC 9728 compliant)
 
 examples/
 ├── use_agent.py         # Demo with fancy Rich console output
+├── dynamic_agent.py     # Dynamic discovery examples
 └── servers/
     └── math_server.py   # Sample MCP HTTP server
 

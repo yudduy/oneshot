@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("fastmcp")
 
-from deepmcpagent.tools import _jsonschema_to_pydantic  # type: ignore
+from oneshotmcp.tools import _jsonschema_to_pydantic  # type: ignore
 
 
 def test_jsonschema_to_pydantic_basic_types() -> None:
